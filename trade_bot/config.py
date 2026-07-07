@@ -10,12 +10,15 @@ class BotConfig:
     interval: str = "1h"             # candle-interval: 1m, 5m, 15m, 1h, 4h, 1d
 
     # Strategie
-    strategy: str = "sma_cross"      # "sma_cross" of "rsi"
+    strategy: str = "sma_cross"      # "sma_cross", "rsi" of "macd"
     fast_period: int = 10            # snelle SMA (sma_cross)
     slow_period: int = 30            # trage SMA (sma_cross)
     rsi_period: int = 14             # RSI-periode (rsi)
     rsi_oversold: float = 30.0       # koopsignaal onder deze RSI
     rsi_overbought: float = 70.0     # verkoopsignaal boven deze RSI
+    macd_fast: int = 12              # snelle EMA (macd)
+    macd_slow: int = 26              # trage EMA (macd)
+    macd_signal: int = 9             # signaallijn-periode (macd)
 
     # Portfolio & risico
     start_cash: float = 10_000.0     # startkapitaal in quote-valuta (USDT)
@@ -36,5 +39,7 @@ class BotConfig:
             raise ValueError("position_size moet tussen 0 en 1 liggen")
         if self.start_cash <= 0:
             raise ValueError("start_cash moet positief zijn")
-        if self.strategy not in ("sma_cross", "rsi"):
+        if self.macd_fast >= self.macd_slow:
+            raise ValueError("macd_fast moet kleiner zijn dan macd_slow")
+        if self.strategy not in ("sma_cross", "rsi", "macd"):
             raise ValueError(f"onbekende strategie: {self.strategy}")

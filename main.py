@@ -28,6 +28,9 @@ def build_config(args: argparse.Namespace) -> BotConfig:
         rsi_period=args.rsi_period,
         rsi_oversold=args.oversold,
         rsi_overbought=args.overbought,
+        macd_fast=args.macd_fast,
+        macd_slow=args.macd_slow,
+        macd_signal=args.macd_signal,
         start_cash=args.cash,
         position_size=args.size,
         fee_rate=args.fee,
@@ -42,12 +45,15 @@ def build_config(args: argparse.Namespace) -> BotConfig:
 def add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--symbol", default="BTCUSDT", help="handelspaar (standaard BTCUSDT)")
     parser.add_argument("--interval", default="1h", help="candle-interval, bv. 15m, 1h, 4h, 1d")
-    parser.add_argument("--strategy", default="sma_cross", choices=["sma_cross", "rsi"])
+    parser.add_argument("--strategy", default="sma_cross", choices=["sma_cross", "rsi", "macd"])
     parser.add_argument("--fast", type=int, default=10, help="snelle SMA-periode")
     parser.add_argument("--slow", type=int, default=30, help="trage SMA-periode")
     parser.add_argument("--rsi-period", type=int, default=14)
     parser.add_argument("--oversold", type=float, default=30.0)
     parser.add_argument("--overbought", type=float, default=70.0)
+    parser.add_argument("--macd-fast", type=int, default=12)
+    parser.add_argument("--macd-slow", type=int, default=26)
+    parser.add_argument("--macd-signal", type=int, default=9)
     parser.add_argument("--cash", type=float, default=10_000.0, help="startkapitaal (USDT)")
     parser.add_argument("--size", type=float, default=0.95, help="fractie van cash per aankoop")
     parser.add_argument("--fee", type=float, default=0.001, help="handelskosten per order (0.001 = 0.1%%)")
@@ -75,6 +81,33 @@ def cmd_backtest(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_compare(args: argparse.Namespace) -> int:
+    """Draai alle strategieën op dezelfde data en zet de resultaten naast elkaar."""
+    if args.csv:
+        candles = load_candles_csv(args.csv)
+        print(f"{len(candles)} candles geladen uit {args.csv}")
+    else:
+        candles = fetch_candles(args.symbol, args.interval, limit=args.limit)
+        print(f"{len(candles)} candles opgehaald voor {args.symbol} ({args.interval})")
+
+    rows = []
+    for name in ("sma_cross", "rsi", "macd"):
+        args.strategy = name
+        result = run_backtest(candles, build_config(args))
+        win_rate = 100.0 * result.wins / max(result.wins + result.losses, 1)
+        rows.append((name, result.total_return_pct, result.num_trades, win_rate,
+                     result.max_drawdown_pct))
+
+    buy_hold = (candles[-1].close - candles[0].close) / candles[0].close * 100.0
+    print(f"\n{'strategie':<12} {'rendement':>10} {'trades':>7} {'winrate':>8} {'max dd':>8}")
+    print("-" * 50)
+    for name, ret, trades, win_rate, drawdown in sorted(rows, key=lambda r: -r[1]):
+        print(f"{name:<12} {ret:>9.2f}% {trades:>7d} {win_rate:>7.1f}% {drawdown:>7.2f}%")
+    print("-" * 50)
+    print(f"{'buy & hold':<12} {buy_hold:>9.2f}%")
+    return 0
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     config = build_config(args)
@@ -98,6 +131,12 @@ def main(argv: list[str] | None = None) -> int:
     p_backtest.add_argument("--limit", type=int, default=500, help="aantal candles op te halen (max 1000)")
     p_backtest.add_argument("--trades", action="store_true", help="toon individuele trades")
     p_backtest.set_defaults(func=cmd_backtest)
+
+    p_compare = sub.add_parser("compare", help="alle strategieën vergelijken op dezelfde data")
+    add_common_args(p_compare)
+    p_compare.add_argument("--csv", help="pad naar CSV in plaats van Binance-data")
+    p_compare.add_argument("--limit", type=int, default=500, help="aantal candles op te halen (max 1000)")
+    p_compare.set_defaults(func=cmd_compare)
 
     p_run = sub.add_parser("run", help="live paper-trading loop starten")
     add_common_args(p_run)

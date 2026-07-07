@@ -7,9 +7,9 @@ from datetime import datetime, timedelta, timezone
 from trade_bot.backtest import run_backtest
 from trade_bot.config import BotConfig
 from trade_bot.data import Candle
-from trade_bot.indicators import ema, rsi, sma
+from trade_bot.indicators import ema, macd, rsi, sma
 from trade_bot.portfolio import Portfolio
-from trade_bot.strategy import RsiStrategy, Signal, SmaCrossStrategy
+from trade_bot.strategy import MacdStrategy, RsiStrategy, Signal, SmaCrossStrategy
 
 
 def make_candles(closes: list[float]) -> list[Candle]:
@@ -38,6 +38,18 @@ class TestIndicators(unittest.TestCase):
         prices = list(range(1, 20))
         values = rsi([float(p) for p in prices], 14)
         self.assertEqual(values[-1], 100.0)
+
+    def test_macd_histogram_is_difference(self):
+        prices = [100 + 5 * math.sin(i / 5) + 0.1 * i for i in range(80)]
+        macd_line, signal_line, histogram = macd(prices, 12, 26, 9)
+        self.assertEqual(len(macd_line), len(prices))
+        for m, s, h in zip(macd_line, signal_line, histogram):
+            if h is not None:
+                self.assertAlmostEqual(h, m - s)
+
+    def test_macd_rejects_invalid_periods(self):
+        with self.assertRaises(ValueError):
+            macd([1.0] * 50, 26, 12, 9)
 
     def test_rsi_bounds(self):
         prices = [100 + 5 * math.sin(i / 3) for i in range(60)]
@@ -69,11 +81,24 @@ class TestStrategies(unittest.TestCase):
         signals = [strategy.signal(closes[: i + 1]) for i in range(len(closes))]
         self.assertIn(Signal.BUY, signals)
 
+    def test_macd_strategy_generates_signals(self):
+        # golvende markt → MACD kruist de signaallijn in beide richtingen
+        closes = [100.0 + 20.0 * math.sin(i / 15.0) for i in range(150)]
+        strategy = MacdStrategy(12, 26, 9)
+        signals = [strategy.signal(closes[: i + 1]) for i in range(len(closes))]
+        self.assertIn(Signal.BUY, signals)
+        self.assertIn(Signal.SELL, signals)
+
+    def test_macd_strategy_holds_without_data(self):
+        self.assertIs(MacdStrategy().signal([1.0] * 10), Signal.HOLD)
+
     def test_invalid_periods_rejected(self):
         with self.assertRaises(ValueError):
             SmaCrossStrategy(20, 10)
         with self.assertRaises(ValueError):
             RsiStrategy(14, 70, 30)
+        with self.assertRaises(ValueError):
+            MacdStrategy(26, 12, 9)
 
 
 class TestPortfolio(unittest.TestCase):

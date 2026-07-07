@@ -6,7 +6,8 @@ Koersdata komt van de publieke Binance API — er is **geen API-key nodig** en e
 
 ## Functies
 
-- 📈 **Twee strategieën**: SMA-crossover (trendvolgend) en RSI (mean-reversion)
+- 📈 **Drie strategieën**: SMA-crossover (trendvolgend), RSI (mean-reversion) en MACD
+- ⚖️ **Vergelijken**: `compare` draait alle strategieën op dezelfde data en zet ze naast elkaar
 - 🧪 **Backtester**: test een strategie op historische data met rendement, winrate en max drawdown
 - 📝 **Paper trading**: live bot-loop die orders simuleert met een virtueel portfolio
 - 🛡️ **Risicobeheer**: stop-loss en take-profit per positie, handelskosten worden meegerekend
@@ -33,6 +34,14 @@ python main.py backtest --symbol ETHUSDT --interval 4h --strategy rsi --trades
 python main.py backtest --csv examples/sample_data.csv --strategy sma_cross
 ```
 
+### Strategieën vergelijken
+
+```bash
+# alle strategieën op dezelfde data, gesorteerd op rendement
+python main.py compare --symbol BTCUSDT --interval 1h
+python main.py compare --csv examples/sample_data.csv
+```
+
 ### Live paper trading
 
 ```bash
@@ -52,10 +61,11 @@ python main.py price --symbol BTCUSDT
 
 | Optie | Standaard | Betekenis |
 |---|---|---|
-| `--strategy` | `sma_cross` | `sma_cross` of `rsi` |
+| `--strategy` | `sma_cross` | `sma_cross`, `rsi` of `macd` |
 | `--fast` / `--slow` | 10 / 30 | SMA-perioden voor de crossover |
 | `--rsi-period` | 14 | RSI-periode |
 | `--oversold` / `--overbought` | 30 / 70 | RSI-drempels |
+| `--macd-fast` / `--macd-slow` / `--macd-signal` | 12 / 26 / 9 | MACD-perioden |
 | `--cash` | 10000 | virtueel startkapitaal (USDT) |
 | `--size` | 0.95 | fractie van cash per aankoop |
 | `--fee` | 0.001 | handelskosten per order (0.1%) |
@@ -68,6 +78,8 @@ python main.py price --symbol BTCUSDT
   door het trage (golden cross), verkoopt bij een kruising omlaag (death cross).
 - **RSI**: koopt wanneer de RSI vanuit oversold (< 30) weer omhoog kruist,
   verkoopt wanneer de RSI vanuit overbought (> 70) weer omlaag kruist.
+- **MACD**: koopt wanneer de MACD-lijn omhoog kruist door de signaallijn,
+  verkoopt bij een kruising omlaag.
 
 ## Tests draaien
 
@@ -81,8 +93,8 @@ python -m unittest discover -s tests -v
 trade_bot/
 ├── config.py      # instellingen (BotConfig)
 ├── data.py        # Binance publieke API + CSV-loader
-├── indicators.py  # SMA, EMA, RSI
-├── strategy.py    # SMA-crossover en RSI-strategie
+├── indicators.py  # SMA, EMA, RSI, MACD
+├── strategy.py    # SMA-crossover, RSI- en MACD-strategie
 ├── portfolio.py   # paper-trading portfolio met risicobeheer
 ├── backtest.py    # backtester met statistieken
 └── bot.py         # live paper-trading loop

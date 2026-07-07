@@ -3,7 +3,7 @@
 from enum import Enum
 
 from .config import BotConfig
-from .indicators import rsi, sma
+from .indicators import macd, rsi, sma
 
 
 class Signal(str, Enum):
@@ -68,9 +68,36 @@ class RsiStrategy(Strategy):
         return Signal.HOLD
 
 
+class MacdStrategy(Strategy):
+    """Koop wanneer de MACD-lijn omhoog kruist door de signaallijn, verkoop bij kruising omlaag."""
+
+    def __init__(self, fast: int = 12, slow: int = 26, signal_period: int = 9):
+        if fast >= slow:
+            raise ValueError("fast moet kleiner zijn dan slow")
+        self.fast = fast
+        self.slow = slow
+        self.signal_period = signal_period
+
+    def signal(self, closes: list[float]) -> Signal:
+        if len(closes) < self.slow + self.signal_period + 1:
+            return Signal.HOLD
+        macd_line, signal_line, _ = macd(closes, self.fast, self.slow, self.signal_period)
+        prev_m, prev_s = macd_line[-2], signal_line[-2]
+        cur_m, cur_s = macd_line[-1], signal_line[-1]
+        if None in (prev_m, prev_s, cur_m, cur_s):
+            return Signal.HOLD
+        if prev_m <= prev_s and cur_m > cur_s:
+            return Signal.BUY
+        if prev_m >= prev_s and cur_m < cur_s:
+            return Signal.SELL
+        return Signal.HOLD
+
+
 def build_strategy(config: BotConfig) -> Strategy:
     if config.strategy == "sma_cross":
         return SmaCrossStrategy(config.fast_period, config.slow_period)
     if config.strategy == "rsi":
         return RsiStrategy(config.rsi_period, config.rsi_oversold, config.rsi_overbought)
+    if config.strategy == "macd":
+        return MacdStrategy(config.macd_fast, config.macd_slow, config.macd_signal)
     raise ValueError(f"onbekende strategie: {config.strategy}")

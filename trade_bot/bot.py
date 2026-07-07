@@ -27,7 +27,8 @@ class TradeBot:
     def step(self) -> None:
         """Eén iteratie: data ophalen, signaal bepalen, eventueel (paper) handelen."""
         cfg = self.config
-        candles = fetch_candles(cfg.symbol, cfg.interval, limit=max(cfg.slow_period, cfg.rsi_period) + 50)
+        lookback = max(cfg.slow_period, cfg.rsi_period, cfg.macd_slow + cfg.macd_signal)
+        candles = fetch_candles(cfg.symbol, cfg.interval, limit=lookback + 50)
         closes = [c.close for c in candles]
         price = closes[-1]
 

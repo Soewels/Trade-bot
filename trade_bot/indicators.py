@@ -64,6 +64,33 @@ def rsi(prices: list[float], period: int = 14) -> list[Optional[float]]:
     return out
 
 
+def macd(prices: list[float], fast: int = 12, slow: int = 26, signal: int = 9,
+         ) -> tuple[list[Optional[float]], list[Optional[float]], list[Optional[float]]]:
+    """MACD: geeft (macd-lijn, signaallijn, histogram) terug."""
+    if fast >= slow:
+        raise ValueError("fast moet kleiner zijn dan slow")
+    fast_ema = ema(prices, fast)
+    slow_ema = ema(prices, slow)
+    macd_line: list[Optional[float]] = [
+        f - s if f is not None and s is not None else None
+        for f, s in zip(fast_ema, slow_ema)
+    ]
+
+    # Signaallijn: EMA van de MACD-lijn, berekend over het gevulde deel
+    first = next((i for i, v in enumerate(macd_line) if v is not None), None)
+    signal_line: list[Optional[float]] = [None] * len(prices)
+    if first is not None:
+        filled = [v for v in macd_line[first:] if v is not None]
+        for offset, value in enumerate(ema(filled, signal)):
+            signal_line[first + offset] = value
+
+    histogram: list[Optional[float]] = [
+        m - s if m is not None and s is not None else None
+        for m, s in zip(macd_line, signal_line)
+    ]
+    return macd_line, signal_line, histogram
+
+
 def _rsi_value(avg_gain: float, avg_loss: float) -> float:
     if avg_loss == 0:
         return 100.0
