@@ -10,12 +10,14 @@ Voorbeelden:
 
 import argparse
 import logging
+import os
 import sys
 
 from trade_bot.backtest import run_backtest
 from trade_bot.bot import TradeBot
 from trade_bot.config import BotConfig
 from trade_bot.data import fetch_candles, fetch_price, load_candles_csv
+from trade_bot.exchange import BinanceExchange
 
 
 def build_config(args: argparse.Namespace) -> BotConfig:
@@ -37,6 +39,7 @@ def build_config(args: argparse.Namespace) -> BotConfig:
         stop_loss=args.stop_loss,
         take_profit=args.take_profit,
         poll_seconds=getattr(args, "poll", 60),
+        max_order=getattr(args, "max_order", 100.0),
     )
     config.validate()
     return config
@@ -108,11 +111,44 @@ def cmd_compare(args: argparse.Namespace) -> int:
     return 0
 
 
+def make_exchange(args: argparse.Namespace) -> BinanceExchange | None:
+    """Bouw een exchange-koppeling voor --testnet/--live, met bevestiging voor live."""
+    if not (args.live or args.testnet):
+        return None
+    api_key = os.environ.get("BINANCE_API_KEY", "")
+    api_secret = os.environ.get("BINANCE_API_SECRET", "")
+    if not api_key or not api_secret:
+        print("FOUT: zet eerst je API-keys als environment variables:", file=sys.stderr)
+        print("  export BINANCE_API_KEY=...", file=sys.stderr)
+        print("  export BINANCE_API_SECRET=...", file=sys.stderr)
+        if args.testnet:
+            print("Testnet-keys maak je gratis aan op https://testnet.binance.vision", file=sys.stderr)
+        sys.exit(1)
+
+    if args.live and not args.testnet:
+        print("=" * 60)
+        print("WAARSCHUWING: LIVE TRADING — er wordt met ECHT GELD gehandeld.")
+        print(f"  paar:            {args.symbol.upper()}")
+        print(f"  max per order:   {args.max_order:.2f}")
+        print(f"  budget (cap):    {args.cash:.2f}")
+        print(f"  stop-loss:       {args.stop_loss:.1%}   take-profit: {args.take_profit:.1%}")
+        print("=" * 60)
+        answer = input(f"Typ '{args.symbol.upper()}' om te bevestigen (iets anders = stoppen): ")
+        if answer.strip().upper() != args.symbol.upper():
+            print("Geannuleerd — er is niets gebeurd.")
+            sys.exit(0)
+
+    return BinanceExchange(api_key, api_secret, testnet=args.testnet)
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     config = build_config(args)
-    print("LET OP: dit is paper trading — er wordt niet met echt geld gehandeld.")
-    TradeBot(config).run()
+    exchange = make_exchange(args)
+    if exchange is None:
+        print("Paper trading — er wordt niet met echt geld gehandeld. "
+              "Gebruik --testnet of --live voor echte orders.")
+    TradeBot(config, exchange=exchange).run()
     return 0
 
 
@@ -138,9 +174,15 @@ def main(argv: list[str] | None = None) -> int:
     p_compare.add_argument("--limit", type=int, default=500, help="aantal candles op te halen (max 1000)")
     p_compare.set_defaults(func=cmd_compare)
 
-    p_run = sub.add_parser("run", help="live paper-trading loop starten")
+    p_run = sub.add_parser("run", help="trading-loop starten (standaard paper trading)")
     add_common_args(p_run)
     p_run.add_argument("--poll", type=int, default=60, help="seconden tussen polls")
+    p_run.add_argument("--testnet", action="store_true",
+                       help="echte orders op het Binance-TESTNET (nepgeld, oefenen)")
+    p_run.add_argument("--live", action="store_true",
+                       help="echte orders met ECHT GELD (vraagt bevestiging)")
+    p_run.add_argument("--max-order", type=float, default=100.0,
+                       help="max bedrag per live aankoop in quote-valuta (standaard 100)")
     p_run.set_defaults(func=cmd_run)
 
     p_price = sub.add_parser("price", help="huidige prijs opvragen")

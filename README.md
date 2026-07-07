@@ -1,8 +1,8 @@
 # Trade-bot
 
-Een crypto trading bot in Python met **paper trading** (gesimuleerd geld) en **backtesting**.
-Koersdata komt van de publieke Binance API — er is **geen API-key nodig** en er wordt
-**nooit met echt geld gehandeld**.
+Een crypto trading bot in Python met **backtesting**, **paper trading** (gesimuleerd geld)
+en optioneel **echt handelen** via Binance (testnet of live). Standaard draait alles in
+paper-modus: geen API-key nodig, geen echt geld.
 
 ## Functies
 
@@ -10,6 +10,8 @@ Koersdata komt van de publieke Binance API — er is **geen API-key nodig** en e
 - ⚖️ **Vergelijken**: `compare` draait alle strategieën op dezelfde data en zet ze naast elkaar
 - 🧪 **Backtester**: test een strategie op historische data met rendement, winrate en max drawdown
 - 📝 **Paper trading**: live bot-loop die orders simuleert met een virtueel portfolio
+- 💸 **Echt handelen** (optioneel): market orders via de Binance API, eerst op het gratis
+  testnet, daarna live — met bestedingslimiet per order en expliciete bevestiging
 - 🛡️ **Risicobeheer**: stop-loss en take-profit per positie, handelskosten worden meegerekend
 - 📂 **CSV-support**: backtest ook op eigen data (`timestamp,open,high,low,close,volume`)
 
@@ -51,6 +53,42 @@ python main.py run --symbol BTCUSDT --interval 15m --poll 60
 De bot haalt elke `--poll` seconden nieuwe data op, bepaalt een signaal en
 simuleert orders. Stoppen met `Ctrl+C`.
 
+### Echt handelen — stap 1: oefenen op het testnet (nepgeld)
+
+1. Maak gratis testnet-keys aan op <https://testnet.binance.vision> (inloggen met GitHub).
+2. Zet de keys als environment variables en start met `--testnet`:
+
+```bash
+export BINANCE_API_KEY="je_testnet_key"
+export BINANCE_API_SECRET="je_testnet_secret"
+python main.py run --symbol BTCUSDT --interval 15m --testnet
+```
+
+De bot plaatst nu échte orders, maar met nepgeld. Laat dit minstens een paar weken
+draaien voordat je aan live denkt.
+
+### Echt handelen — stap 2: live (echt geld, eigen risico)
+
+1. Maak API-keys aan op Binance met **alleen spot-handel** rechten — zet opnames
+   (withdrawals) **uit** en beperk de key tot je eigen IP-adres.
+2. Start met `--live`; de bot toont de instellingen en vraagt om bevestiging:
+
+```bash
+export BINANCE_API_KEY="je_echte_key"
+export BINANCE_API_SECRET="je_echte_secret"
+python main.py run --symbol BTCUSDT --interval 1h --live --max-order 25 --cash 100
+```
+
+Veiligheidsgrendels in live-modus:
+
+- `--max-order` (standaard 100): maximum bedrag per aankoop, wat er ook gebeurt
+- `--cash`: totaalbudget — de bot gebruikt nooit meer dan dit, ook niet als je
+  exchange-saldo hoger is
+- expliciete bevestiging bij het starten (je moet het handelspaar intypen)
+- stop-loss en take-profit blijven actief zoals in paper-modus
+
+Begin klein: `--max-order 25 --cash 100` betekent maximaal €100 aan totale blootstelling.
+
 ### Huidige prijs
 
 ```bash
@@ -71,6 +109,9 @@ python main.py price --symbol BTCUSDT
 | `--fee` | 0.001 | handelskosten per order (0.1%) |
 | `--stop-loss` | 0.05 | verkoop bij 5% verlies (0 = uit) |
 | `--take-profit` | 0.15 | verkoop bij 15% winst (0 = uit) |
+| `--testnet` | uit | echte orders op het Binance-testnet (nepgeld) |
+| `--live` | uit | echte orders met echt geld (vraagt bevestiging) |
+| `--max-order` | 100 | max bedrag per live aankoop |
 
 ## Hoe werken de strategieën?
 
@@ -95,16 +136,21 @@ trade_bot/
 ├── data.py        # Binance publieke API + CSV-loader
 ├── indicators.py  # SMA, EMA, RSI, MACD
 ├── strategy.py    # SMA-crossover, RSI- en MACD-strategie
-├── portfolio.py   # paper-trading portfolio met risicobeheer
+├── portfolio.py   # portfolio-boekhouding met risicobeheer
+├── exchange.py    # Binance-koppeling voor echte orders (testnet/live)
 ├── backtest.py    # backtester met statistieken
-└── bot.py         # live paper-trading loop
+└── bot.py         # trading-loop (paper, testnet of live)
 main.py            # command-line interface
 tests/             # unit tests
 ```
 
 ## ⚠️ Disclaimer
 
-Deze bot is bedoeld voor **educatie en simulatie**. Hij plaatst geen echte orders.
-Resultaten uit backtests zijn geen garantie voor toekomstig rendement. Wil je dit
-ooit uitbreiden naar echt handelen, doe dat dan volledig op eigen risico en begin
-altijd met kleine bedragen.
+Handelen in crypto is risicovol; je kunt (al) je inleg verliezen. Deze bot en zijn
+strategieën bieden **geen enkele garantie op winst** — resultaten uit backtests zeggen
+weinig over de toekomst. Live handelen is volledig op eigen risico. Vuistregels:
+
+- Oefen eerst weken op paper/testnet voordat je live gaat.
+- Handel alleen met geld dat je kunt missen, en begin met kleine bedragen.
+- Geef je API-key nooit opname-rechten en deel hem met niemand.
+- Een bot is geen "geld verdienen zonder iets te doen" — controleer hem dagelijks.

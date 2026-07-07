@@ -29,6 +29,7 @@ class BotConfig:
 
     # Live loop
     poll_seconds: int = 60           # hoe vaak de bot nieuwe data ophaalt
+    max_order: float = 100.0         # max bedrag (quote-valuta) per LIVE aankoop
 
     extra: dict = field(default_factory=dict)
 
@@ -39,6 +40,8 @@ class BotConfig:
             raise ValueError("position_size moet tussen 0 en 1 liggen")
         if self.start_cash <= 0:
             raise ValueError("start_cash moet positief zijn")
+        if self.max_order <= 0:
+            raise ValueError("max_order moet positief zijn")
         if self.macd_fast >= self.macd_slow:
             raise ValueError("macd_fast moet kleiner zijn dan macd_slow")
         if self.strategy not in ("sma_cross", "rsi", "macd"):
