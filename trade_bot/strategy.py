@@ -6,6 +6,9 @@ from .config import BotConfig
 from .indicators import macd, rsi, sma
 
 
+STRATEGY_NAMES = ("sma_cross", "rsi", "macd")
+
+
 class Signal(str, Enum):
     BUY = "BUY"
     SELL = "SELL"

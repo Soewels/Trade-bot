@@ -10,6 +10,8 @@ from trade_bot.bot import TradeBot, quote_asset
 from trade_bot.config import BotConfig
 from trade_bot.data import Candle
 from trade_bot.exchange import BinanceExchange, ExchangeError, Fill
+from trade_bot.notify import TelegramNotifier
+from trade_bot.state import load_state, save_state
 from trade_bot.webapp import Dashboard
 from trade_bot.indicators import ema, macd, rsi, sma
 from trade_bot.portfolio import Portfolio
@@ -238,6 +240,137 @@ class TestLiveBot(unittest.TestCase):
         with mock.patch("trade_bot.bot.fetch_candles", return_value=candles):
             bot.step()
         self.assertTrue(bot.portfolio.in_position)  # paper-aankoop gedaan
+
+
+class TestState(unittest.TestCase):
+    def _state_path(self) -> str:
+        import tempfile
+        d = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, d, True)
+        return f"{d}/state.json"
+
+    def test_roundtrip_restores_position_and_trades(self):
+        path = self._state_path()
+        bot = TradeBot(BotConfig(symbol="BTCUSDT"))
+        bot.portfolio.buy(100.0, 0.5)
+        bot.equity_history.extend([10000.0, 10100.0])
+        save_state(bot, path)
+
+        restored = TradeBot(BotConfig(symbol="BTCUSDT"), state_file=path)
+        self.assertTrue(restored.portfolio.in_position)
+        self.assertAlmostEqual(restored.portfolio.entry_price, 100.0)
+        self.assertAlmostEqual(restored.portfolio.cash, bot.portfolio.cash)
+        self.assertEqual(len(restored.portfolio.trades), 1)
+        self.assertEqual(list(restored.equity_history), [10000.0, 10100.0])
+
+    def test_symbol_mismatch_starts_clean(self):
+        path = self._state_path()
+        bot = TradeBot(BotConfig(symbol="BTCUSDT"))
+        bot.portfolio.buy(100.0, 0.5)
+        save_state(bot, path)
+
+        other = TradeBot(BotConfig(symbol="ETHUSDT"))
+        self.assertFalse(load_state(other, path))
+        self.assertFalse(other.portfolio.in_position)
+
+    def test_missing_file_is_fine(self):
+        bot = TradeBot(BotConfig())
+        self.assertFalse(load_state(bot, "/nonexistent/state.json"))
+
+    def test_live_mode_keeps_exchange_cash(self):
+        path = self._state_path()
+        paper = TradeBot(BotConfig(symbol="BTCUSDT", start_cash=10_000.0))
+        paper.portfolio.buy(100.0, 0.5)
+        save_state(paper, path)
+
+        live = TradeBot(BotConfig(symbol="BTCUSDT", start_cash=10_000.0),
+                        exchange=FakeExchange(balance=300.0), state_file=path)
+        self.assertAlmostEqual(live.portfolio.cash, 300.0)  # exchange-saldo leidend
+        self.assertTrue(live.portfolio.in_position)          # maar positie hersteld
+
+
+class TestNotify(unittest.TestCase):
+    def test_send_posts_to_telegram_api(self):
+        notifier = TelegramNotifier("TOKEN123", "42")
+        with mock.patch("trade_bot.notify.requests.post") as post:
+            post.return_value.status_code = 200
+            self.assertTrue(notifier.send("hallo"))
+        url = post.call_args.args[0]
+        payload = post.call_args.kwargs["json"]
+        self.assertIn("botTOKEN123/sendMessage", url)
+        self.assertEqual(payload, {"chat_id": "42", "text": "hallo"})
+
+    def test_send_never_raises_on_network_error(self):
+        import requests as req
+        notifier = TelegramNotifier("t", "c")
+        with mock.patch("trade_bot.notify.requests.post", side_effect=req.ConnectionError):
+            self.assertFalse(notifier.send("hallo"))
+
+    def test_error_cooldown_limits_spam(self):
+        notifier = TelegramNotifier("t", "c")
+        with mock.patch("trade_bot.notify.requests.post") as post:
+            post.return_value.status_code = 200
+            self.assertTrue(notifier.send_error("fout 1"))
+            self.assertFalse(notifier.send_error("fout 2"))  # binnen afkoelperiode
+        self.assertEqual(post.call_count, 1)
+
+    def test_from_env(self):
+        with mock.patch.dict("os.environ", {"TELEGRAM_BOT_TOKEN": "t",
+                                            "TELEGRAM_CHAT_ID": "c"}):
+            self.assertIsNotNone(TelegramNotifier.from_env())
+        with mock.patch.dict("os.environ", {}, clear=True):
+            self.assertIsNone(TelegramNotifier.from_env())
+
+
+class TestAutoStrategy(unittest.TestCase):
+    def test_relearn_picks_best_strategy(self):
+        config = BotConfig(strategy="auto", fast_period=5, slow_period=20)
+        bot = TradeBot(config)
+        closes = [100.0 - i for i in range(30)] + [70.0 + 2 * i for i in range(40)] \
+            + [150.0 - 2 * i for i in range(20)]
+        candles = make_candles(closes)
+
+        # bepaal onafhankelijk welke strategie op deze data wint
+        from dataclasses import replace
+        from trade_bot.strategy import STRATEGY_NAMES
+        expected = max(STRATEGY_NAMES,
+                       key=lambda n: run_backtest(candles, replace(config, strategy=n))
+                       .total_return_pct)
+
+        with mock.patch("trade_bot.bot.fetch_candles", return_value=candles):
+            bot.relearn()
+        self.assertEqual(bot.active_strategy, expected)
+
+    def test_no_switch_while_in_position(self):
+        config = BotConfig(strategy="auto")
+        bot = TradeBot(config)
+        bot.portfolio.buy(100.0, 0.5)
+        with mock.patch.object(bot, "relearn") as relearn:
+            bot._maybe_relearn()
+        relearn.assert_not_called()
+
+    def test_fixed_strategy_never_relearns(self):
+        bot = TradeBot(BotConfig(strategy="sma_cross"))
+        with mock.patch.object(bot, "relearn") as relearn:
+            bot._maybe_relearn()
+        relearn.assert_not_called()
+
+    def test_notifier_receives_trade_message(self):
+        messages = []
+
+        class FakeNotifier:
+            def send(self, text):
+                messages.append(text)
+
+            def send_error(self, text):
+                messages.append(text)
+
+        config = BotConfig(strategy="sma_cross", fast_period=5, slow_period=20)
+        bot = TradeBot(config, notifier=FakeNotifier())
+        candles = TestLiveBot._candles_with_buy_signal(config)
+        with mock.patch("trade_bot.bot.fetch_candles", return_value=candles):
+            bot.step()
+        self.assertTrue(any("Gekocht" in m for m in messages))
 
 
 class TestDashboard(unittest.TestCase):

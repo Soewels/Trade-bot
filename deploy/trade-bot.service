@@ -1,0 +1,31 @@
+# systemd-service voor de trade bot.
+# Installatie: zie deploy/install.sh of de README.
+#
+# Handige commando's daarna:
+#   sudo systemctl status trade-bot     # draait hij?
+#   sudo journalctl -u trade-bot -f     # live meekijken met de logs
+#   sudo systemctl restart trade-bot    # herstarten
+#   sudo systemctl stop trade-bot       # stoppen
+
+[Unit]
+Description=Crypto trade bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tradebot
+WorkingDirectory=/opt/trade-bot
+EnvironmentFile=/etc/trade-bot.env
+ExecStart=/usr/bin/python3 /opt/trade-bot/main.py run $BOT_ARGS
+Restart=always
+RestartSec=15
+
+# Beperk wat het proces mag, voor het geval er iets misgaat
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/trade-bot
+
+[Install]
+WantedBy=multi-user.target

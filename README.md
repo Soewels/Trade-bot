@@ -13,6 +13,11 @@ paper-modus: geen API-key nodig, geen echt geld.
 - 💸 **Echt handelen** (optioneel): market orders via de Binance API, eerst op het gratis
   testnet, daarna live — met bestedingslimiet per order en expliciete bevestiging
 - 📱 **Mobiel dashboard**: volg de bot op je telefoon, met pauze- en noodstopknop
+- 🧠 **Zelflerend** (`--strategy auto`): test elke paar uur alle strategieën op recente
+  marktdata en schakelt automatisch naar wat nu het beste werkt
+- 💾 **Herstart-veilig**: de bot onthoudt zijn positie en trades, ook na een crash of reboot
+- 🔔 **Telegram-meldingen**: berichtje op je telefoon bij elke koop, verkoop of fout
+- 🖥️ **Server-klaar**: installatiescript + systemd-service voor 24/7 draaien op een VPS
 - 🛡️ **Risicobeheer**: stop-loss en take-profit per positie, handelskosten worden meegerekend
 - 📂 **CSV-support**: backtest ook op eigen data (`timestamp,open,high,low,close,volume`)
 
@@ -90,6 +95,64 @@ Veiligheidsgrendels in live-modus:
 
 Begin klein: `--max-order 25 --cash 100` betekent maximaal €100 aan totale blootstelling.
 
+### Zelflerende modus
+
+```bash
+python main.py run --symbol BTCUSDT --interval 15m --strategy auto
+```
+
+Met `--strategy auto` kiest de bot bij de start zelf de beste strategie en evalueert hij
+elke 6 uur opnieuw (instelbaar met `--relearn-hours`): hij backtest alle strategieën op de
+laatste ~500 candles en schakelt — alleen als hij geen open positie heeft — over naar de
+winnaar. Elke wissel wordt gelogd en (indien ingesteld) via Telegram gemeld.
+
+Eerlijke kanttekening: dit is aanpassen aan de recente markt, geen glazen bol. Het
+voorkomt dat je met een trendstrategie in een zijwaartse markt blijft hangen, maar het
+garandeert geen winst.
+
+### Herstart-veilig geheugen
+
+De bot bewaart zijn toestand (positie, instapprijs, trades) standaard in `bot_state.json`
+en leest die bij het opstarten terug. Crasht de server of herstart je de bot, dan weet hij
+dus nog precies wat hij in bezit heeft en blijft de stop-loss werken. Ander pad instellen:
+`--state /pad/naar/state.json`; uitzetten: `--state ""`. In live-modus is het echte
+exchange-saldo altijd leidend voor de cash; alleen positie en instapprijs komen uit het
+bestand.
+
+### Telegram-meldingen
+
+1. Praat op Telegram met **@BotFather**, stuur `/newbot` en volg de stappen → je krijgt een token.
+2. Stuur je nieuwe bot een berichtje en open `https://api.telegram.org/bot<TOKEN>/getUpdates`
+   in je browser → lees je `chat.id` af.
+3. Zet beide als environment variables en start de bot gewoon:
+
+```bash
+export TELEGRAM_BOT_TOKEN="123456:ABC..."
+export TELEGRAM_CHAT_ID="123456789"
+python main.py run --symbol BTCUSDT --interval 15m
+```
+
+Je krijgt nu een berichtje bij elke (paper of echte) koop en verkoop — met reden en
+resultaat — bij strategiewissels in auto-modus, en maximaal één per kwartier bij storingen.
+
+### 24/7 draaien op een server (VPS)
+
+Op een verse Ubuntu/Debian-server (bv. Hetzner, ~€4/maand):
+
+```bash
+git clone https://github.com/Soewels/Trade-bot.git
+cd Trade-bot
+sudo bash deploy/install.sh
+sudo nano /etc/trade-bot.env       # API-keys en instellingen invullen
+sudo systemctl start trade-bot
+sudo journalctl -u trade-bot -f    # live meekijken met de logs
+```
+
+De bot start daarna automatisch bij elke reboot en herstart zichzelf na een crash —
+in combinatie met het herstart-veilige geheugen verliest hij daarbij nooit zijn positie.
+Voor het dashboard op afstand: installeer [Tailscale](https://tailscale.com) op de server
+en je telefoon, dan bereik je `http://<tailscale-ip>:8080` veilig vanaf overal.
+
 ### Dashboard op je telefoon
 
 Start de bot met `--web` erbij (werkt in paper-, testnet- en live-modus):
@@ -127,7 +190,9 @@ python main.py price --symbol BTCUSDT
 
 | Optie | Standaard | Betekenis |
 |---|---|---|
-| `--strategy` | `sma_cross` | `sma_cross`, `rsi` of `macd` |
+| `--strategy` | `sma_cross` | `sma_cross`, `rsi`, `macd` of `auto` (zelflerend) |
+| `--relearn-hours` | 6 | bij `auto`: elke zoveel uur opnieuw evalueren |
+| `--state` | `bot_state.json` | toestandsbestand voor herstart-veiligheid (`""` = uit) |
 | `--fast` / `--slow` | 10 / 30 | SMA-perioden voor de crossover |
 | `--rsi-period` | 14 | RSI-periode |
 | `--oversold` / `--overbought` | 30 / 70 | RSI-drempels |
@@ -169,7 +234,10 @@ trade_bot/
 ├── exchange.py    # Binance-koppeling voor echte orders (testnet/live)
 ├── backtest.py    # backtester met statistieken
 ├── webapp.py      # mobiel dashboard (webserver)
-└── bot.py         # trading-loop (paper, testnet of live)
+├── state.py       # toestand opslaan/herstellen (herstart-veilig)
+├── notify.py      # Telegram-meldingen
+└── bot.py         # trading-loop (paper, testnet of live) + zelflerende modus
+deploy/            # installatiescript en systemd-service voor een VPS
 main.py            # command-line interface
 tests/             # unit tests
 ```
