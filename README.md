@@ -1,7 +1,7 @@
 # Trade-bot
 
 Een crypto trading bot in Python met **backtesting**, **paper trading** (gesimuleerd geld)
-en optioneel **echt handelen** via Binance (testnet of live). Standaard draait alles in
+en optioneel **echt handelen** via **Binance** of **Kraken**. Standaard draait alles in
 paper-modus: geen API-key nodig, geen echt geld.
 
 ## Functies
@@ -94,6 +94,27 @@ Veiligheidsgrendels in live-modus:
 - stop-loss en take-profit blijven actief zoals in paper-modus
 
 Begin klein: `--max-order 25 --cash 100` betekent maximaal €100 aan totale blootstelling.
+
+### Kraken gebruiken
+
+Alle commando's werken ook op Kraken met `--exchange kraken`. Voor Nederlandse
+gebruikers is dat vaak de logischere keuze: Binance bedient Nederland niet meer,
+Kraken wel (met EU/MiCA-licentie).
+
+```bash
+# koersdata en paper trading via Kraken (geen account nodig)
+python main.py compare --exchange kraken --symbol XBTEUR --interval 4h
+python main.py run --exchange kraken --symbol XBTEUR --interval 15m --web
+```
+
+Let op de symboolnamen: Kraken noemt Bitcoin **XBT** — dus `XBTUSD`, `XBTEUR`,
+`ETHEUR`, enz. Vergeet je het aan te passen, dan kiest de bot automatisch `XBTUSD`.
+
+Voor echt handelen: maak API-keys aan via Kraken → Settings → API met alleen
+*Query Funds* en *Create & Modify Orders* rechten (géén withdrawals), en zet ze
+als `KRAKEN_API_KEY` en `KRAKEN_API_SECRET`. **Kraken heeft geen testnet** voor
+spot-handel; het oefentraject is daar dus: eerst weken paper trading, daarna
+`--live` met een klein bedrag en een lage `--max-order`.
 
 ### Zelflerende modus
 
@@ -190,6 +211,7 @@ python main.py price --symbol BTCUSDT
 
 | Optie | Standaard | Betekenis |
 |---|---|---|
+| `--exchange` | `binance` | `binance` of `kraken` |
 | `--strategy` | `sma_cross` | `sma_cross`, `rsi`, `macd` of `auto` (zelflerend) |
 | `--relearn-hours` | 6 | bij `auto`: elke zoveel uur opnieuw evalueren |
 | `--state` | `bot_state.json` | toestandsbestand voor herstart-veiligheid (`""` = uit) |
@@ -228,10 +250,12 @@ python -m unittest discover -s tests -v
 trade_bot/
 ├── config.py      # instellingen (BotConfig)
 ├── data.py        # Binance publieke API + CSV-loader
+├── kraken.py      # Kraken: koersdata + echte orders
+├── market.py      # exchange-keuze voor koersdata
 ├── indicators.py  # SMA, EMA, RSI, MACD
 ├── strategy.py    # SMA-crossover, RSI- en MACD-strategie
 ├── portfolio.py   # portfolio-boekhouding met risicobeheer
-├── exchange.py    # Binance-koppeling voor echte orders (testnet/live)
+├── exchange.py    # Binance-orders (testnet/live) + gedeelde types
 ├── backtest.py    # backtester met statistieken
 ├── webapp.py      # mobiel dashboard (webserver)
 ├── state.py       # toestand opslaan/herstellen (herstart-veilig)
