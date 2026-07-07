@@ -10,7 +10,8 @@ class BotConfig:
     interval: str = "1h"             # candle-interval: 1m, 5m, 15m, 1h, 4h, 1d
 
     # Strategie
-    strategy: str = "sma_cross"      # "sma_cross", "rsi" of "macd"
+    strategy: str = "sma_cross"      # "sma_cross", "rsi", "macd" of "auto" (zelflerend)
+    relearn_hours: float = 6.0       # bij "auto": elke zoveel uur opnieuw evalueren
     fast_period: int = 10            # snelle SMA (sma_cross)
     slow_period: int = 30            # trage SMA (sma_cross)
     rsi_period: int = 14             # RSI-periode (rsi)
@@ -44,5 +45,7 @@ class BotConfig:
             raise ValueError("max_order moet positief zijn")
         if self.macd_fast >= self.macd_slow:
             raise ValueError("macd_fast moet kleiner zijn dan macd_slow")
-        if self.strategy not in ("sma_cross", "rsi", "macd"):
+        if self.strategy not in ("sma_cross", "rsi", "macd", "auto"):
             raise ValueError(f"onbekende strategie: {self.strategy}")
+        if self.relearn_hours <= 0:
+            raise ValueError("relearn_hours moet positief zijn")

@@ -18,6 +18,7 @@ from trade_bot.bot import TradeBot
 from trade_bot.config import BotConfig
 from trade_bot.data import fetch_candles, fetch_price, load_candles_csv
 from trade_bot.exchange import BinanceExchange
+from trade_bot.notify import TelegramNotifier
 from trade_bot.webapp import Dashboard, local_ip
 
 
@@ -41,6 +42,7 @@ def build_config(args: argparse.Namespace) -> BotConfig:
         take_profit=args.take_profit,
         poll_seconds=getattr(args, "poll", 60),
         max_order=getattr(args, "max_order", 100.0),
+        relearn_hours=getattr(args, "relearn_hours", 6.0),
     )
     config.validate()
     return config
@@ -49,7 +51,9 @@ def build_config(args: argparse.Namespace) -> BotConfig:
 def add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--symbol", default="BTCUSDT", help="handelspaar (standaard BTCUSDT)")
     parser.add_argument("--interval", default="1h", help="candle-interval, bv. 15m, 1h, 4h, 1d")
-    parser.add_argument("--strategy", default="sma_cross", choices=["sma_cross", "rsi", "macd"])
+    parser.add_argument("--strategy", default="sma_cross",
+                        choices=["sma_cross", "rsi", "macd", "auto"],
+                        help="handelsstrategie; 'auto' kiest en leert zelf (alleen bij run)")
     parser.add_argument("--fast", type=int, default=10, help="snelle SMA-periode")
     parser.add_argument("--slow", type=int, default=30, help="trage SMA-periode")
     parser.add_argument("--rsi-period", type=int, default=14)
@@ -66,6 +70,10 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
 
 
 def cmd_backtest(args: argparse.Namespace) -> int:
+    if args.strategy == "auto":
+        print("'auto' is alleen voor run; gebruik 'compare' om strategieën te vergelijken.",
+              file=sys.stderr)
+        return 1
     config = build_config(args)
     if args.csv:
         candles = load_candles_csv(args.csv)
@@ -127,17 +135,25 @@ def make_exchange(args: argparse.Namespace) -> BinanceExchange | None:
         sys.exit(1)
 
     if args.live and not args.testnet:
+        symbol = args.symbol.upper()
         print("=" * 60)
         print("WAARSCHUWING: LIVE TRADING — er wordt met ECHT GELD gehandeld.")
-        print(f"  paar:            {args.symbol.upper()}")
+        print(f"  paar:            {symbol}")
         print(f"  max per order:   {args.max_order:.2f}")
         print(f"  budget (cap):    {args.cash:.2f}")
         print(f"  stop-loss:       {args.stop_loss:.1%}   take-profit: {args.take_profit:.1%}")
         print("=" * 60)
-        answer = input(f"Typ '{args.symbol.upper()}' om te bevestigen (iets anders = stoppen): ")
-        if answer.strip().upper() != args.symbol.upper():
-            print("Geannuleerd — er is niets gebeurd.")
-            sys.exit(0)
+        if sys.stdin.isatty():
+            answer = input(f"Typ '{symbol}' om te bevestigen (iets anders = stoppen): ")
+            if answer.strip().upper() != symbol:
+                print("Geannuleerd — er is niets gebeurd.")
+                sys.exit(0)
+        elif os.environ.get("LIVE_TRADING_ACK", "").upper() != symbol:
+            # geen terminal (bv. systemd): bevestiging moet via env var
+            print(f"FOUT: geen terminal voor bevestiging. Zet LIVE_TRADING_ACK={symbol} "
+                  "in de environment om live trading zonder terminal te bevestigen.",
+                  file=sys.stderr)
+            sys.exit(1)
 
     return BinanceExchange(api_key, api_secret, testnet=args.testnet)
 
@@ -149,7 +165,13 @@ def cmd_run(args: argparse.Namespace) -> int:
     if exchange is None:
         print("Paper trading — er wordt niet met echt geld gehandeld. "
               "Gebruik --testnet of --live voor echte orders.")
-    bot = TradeBot(config, exchange=exchange)
+    notifier = TelegramNotifier.from_env()
+    if notifier:
+        print("Telegram-meldingen actief.")
+    bot = TradeBot(config, exchange=exchange, notifier=notifier,
+                   state_file=args.state or None)
+    if args.state:
+        print(f"Toestand wordt bewaard in {args.state} (herstart-veilig).")
     if args.web is not None:
         dashboard = Dashboard(bot, port=args.web)
         dashboard.start()
@@ -195,6 +217,10 @@ def main(argv: list[str] | None = None) -> int:
     p_run.add_argument("--web", type=int, nargs="?", const=8080, default=None,
                        metavar="POORT",
                        help="start het mobiele dashboard (standaardpoort 8080)")
+    p_run.add_argument("--state", default="bot_state.json", metavar="PAD",
+                       help="bestand voor de bot-toestand ('' = uit, standaard bot_state.json)")
+    p_run.add_argument("--relearn-hours", type=float, default=6.0,
+                       help="bij --strategy auto: elke zoveel uur opnieuw evalueren")
     p_run.set_defaults(func=cmd_run)
 
     p_price = sub.add_parser("price", help="huidige prijs opvragen")

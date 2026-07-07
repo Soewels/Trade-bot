@@ -196,7 +196,9 @@ class Dashboard:
         return {
             "mode": bot.mode, "paused": bot.paused,
             "symbol": bot.config.symbol, "interval": bot.config.interval,
-            "strategy": bot.config.strategy, "quote": bot.quote,
+            "strategy": bot.active_strategy
+                        + (" (auto)" if bot.config.strategy == "auto" else ""),
+            "quote": bot.quote,
             "equity": round(equity, 2), "cash": round(p.cash, 2),
             "position": p.position, "last_price": price or None,
             "return_pct": round((equity - start) / start * 100, 2),
