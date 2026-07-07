@@ -16,14 +16,25 @@ import sys
 from trade_bot.backtest import run_backtest
 from trade_bot.bot import TradeBot
 from trade_bot.config import BotConfig
-from trade_bot.data import fetch_candles, fetch_price, load_candles_csv
+from trade_bot.data import load_candles_csv
 from trade_bot.exchange import BinanceExchange
+from trade_bot.kraken import KrakenExchange
+from trade_bot.market import get_market
 from trade_bot.notify import TelegramNotifier
 from trade_bot.webapp import Dashboard, local_ip
 
 
+def resolve_symbol(args: argparse.Namespace) -> None:
+    """Vervang het Binance-standaardpaar door het Kraken-equivalent."""
+    if args.exchange == "kraken" and args.symbol == "BTCUSDT":
+        args.symbol = "XBTUSD"
+        print("Kraken gekozen: standaardpaar aangepast naar XBTUSD "
+              "(Kraken noemt Bitcoin XBT).")
+
+
 def build_config(args: argparse.Namespace) -> BotConfig:
     config = BotConfig(
+        exchange=args.exchange,
         symbol=args.symbol,
         interval=args.interval,
         strategy=args.strategy,
@@ -49,7 +60,10 @@ def build_config(args: argparse.Namespace) -> BotConfig:
 
 
 def add_common_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--symbol", default="BTCUSDT", help="handelspaar (standaard BTCUSDT)")
+    parser.add_argument("--exchange", default="binance", choices=["binance", "kraken"],
+                        help="exchange voor koersdata en orders (standaard binance)")
+    parser.add_argument("--symbol", default="BTCUSDT",
+                        help="handelspaar (standaard BTCUSDT; Kraken: XBTUSD)")
     parser.add_argument("--interval", default="1h", help="candle-interval, bv. 15m, 1h, 4h, 1d")
     parser.add_argument("--strategy", default="sma_cross",
                         choices=["sma_cross", "rsi", "macd", "auto"],
@@ -74,13 +88,16 @@ def cmd_backtest(args: argparse.Namespace) -> int:
         print("'auto' is alleen voor run; gebruik 'compare' om strategieën te vergelijken.",
               file=sys.stderr)
         return 1
+    resolve_symbol(args)
     config = build_config(args)
     if args.csv:
         candles = load_candles_csv(args.csv)
         print(f"{len(candles)} candles geladen uit {args.csv}")
     else:
-        candles = fetch_candles(config.symbol, config.interval, limit=args.limit)
-        print(f"{len(candles)} candles opgehaald voor {config.symbol} ({config.interval})")
+        market = get_market(config.exchange)
+        candles = market.fetch_candles(config.symbol, config.interval, limit=args.limit)
+        print(f"{len(candles)} candles opgehaald voor {config.symbol} "
+              f"({config.interval}, {market.name})")
 
     result = run_backtest(candles, config)
     print(f"\nBacktest {config.symbol} — strategie: {config.strategy}")
@@ -95,12 +112,15 @@ def cmd_backtest(args: argparse.Namespace) -> int:
 
 def cmd_compare(args: argparse.Namespace) -> int:
     """Draai alle strategieën op dezelfde data en zet de resultaten naast elkaar."""
+    resolve_symbol(args)
     if args.csv:
         candles = load_candles_csv(args.csv)
         print(f"{len(candles)} candles geladen uit {args.csv}")
     else:
-        candles = fetch_candles(args.symbol, args.interval, limit=args.limit)
-        print(f"{len(candles)} candles opgehaald voor {args.symbol} ({args.interval})")
+        market = get_market(args.exchange)
+        candles = market.fetch_candles(args.symbol, args.interval, limit=args.limit)
+        print(f"{len(candles)} candles opgehaald voor {args.symbol} "
+              f"({args.interval}, {market.name})")
 
     rows = []
     for name in ("sma_cross", "rsi", "macd"):
@@ -120,16 +140,27 @@ def cmd_compare(args: argparse.Namespace) -> int:
     return 0
 
 
-def make_exchange(args: argparse.Namespace) -> BinanceExchange | None:
+def make_exchange(args: argparse.Namespace):
     """Bouw een exchange-koppeling voor --testnet/--live, met bevestiging voor live."""
     if not (args.live or args.testnet):
         return None
-    api_key = os.environ.get("BINANCE_API_KEY", "")
-    api_secret = os.environ.get("BINANCE_API_SECRET", "")
+
+    if args.exchange == "kraken":
+        if args.testnet:
+            print("Kraken heeft geen testnet voor spot-handel. Oefen met paper trading\n"
+                  "(gewoon zonder --testnet/--live starten) en ga daarna pas --live.",
+                  file=sys.stderr)
+            sys.exit(1)
+        key_var, secret_var = "KRAKEN_API_KEY", "KRAKEN_API_SECRET"
+    else:
+        key_var, secret_var = "BINANCE_API_KEY", "BINANCE_API_SECRET"
+
+    api_key = os.environ.get(key_var, "")
+    api_secret = os.environ.get(secret_var, "")
     if not api_key or not api_secret:
         print("FOUT: zet eerst je API-keys als environment variables:", file=sys.stderr)
-        print("  export BINANCE_API_KEY=...", file=sys.stderr)
-        print("  export BINANCE_API_SECRET=...", file=sys.stderr)
+        print(f"  export {key_var}=...", file=sys.stderr)
+        print(f"  export {secret_var}=...", file=sys.stderr)
         if args.testnet:
             print("Testnet-keys maak je gratis aan op https://testnet.binance.vision", file=sys.stderr)
         sys.exit(1)
@@ -155,11 +186,14 @@ def make_exchange(args: argparse.Namespace) -> BinanceExchange | None:
                   file=sys.stderr)
             sys.exit(1)
 
+    if args.exchange == "kraken":
+        return KrakenExchange(api_key, api_secret)
     return BinanceExchange(api_key, api_secret, testnet=args.testnet)
 
 
 def cmd_run(args: argparse.Namespace) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    resolve_symbol(args)
     config = build_config(args)
     exchange = make_exchange(args)
     if exchange is None:
@@ -184,7 +218,9 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def cmd_price(args: argparse.Namespace) -> int:
-    print(f"{args.symbol.upper()}: {fetch_price(args.symbol)}")
+    resolve_symbol(args)
+    market = get_market(args.exchange)
+    print(f"{args.symbol.upper()} ({market.name}): {market.fetch_price(args.symbol)}")
     return 0
 
 
@@ -224,6 +260,7 @@ def main(argv: list[str] | None = None) -> int:
     p_run.set_defaults(func=cmd_run)
 
     p_price = sub.add_parser("price", help="huidige prijs opvragen")
+    p_price.add_argument("--exchange", default="binance", choices=["binance", "kraken"])
     p_price.add_argument("--symbol", default="BTCUSDT")
     p_price.set_defaults(func=cmd_price)
 

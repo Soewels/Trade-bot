@@ -15,37 +15,44 @@ from dataclasses import replace
 
 from .backtest import run_backtest
 from .config import BotConfig
-from .data import fetch_candles
-from .exchange import BinanceExchange, ExchangeError
+from .exchange import ExchangeError
+from .market import get_market
 from .portfolio import Portfolio
 from .strategy import STRATEGY_NAMES, Signal, build_strategy
 
 logger = logging.getLogger("trade_bot")
 
-QUOTE_ASSETS = ("USDT", "USDC", "FDUSD", "TUSD", "BUSD", "EUR", "BTC", "ETH", "BNB")
+# Volgorde is belangrijk: langere/specifiekere namen eerst (USDT vóór USD).
+# Kraken kent geen TUSD/BUSD-paren maar wel XBTUSD, dat op "TUSD" zou eindigen —
+# daarom per exchange een eigen lijst.
+QUOTE_ASSETS = {
+    "binance": ("USDT", "USDC", "FDUSD", "TUSD", "BUSD", "EUR", "BTC", "ETH", "BNB"),
+    "kraken": ("USDT", "USDC", "EUR", "USD", "GBP", "CHF", "JPY", "XBT", "ETH"),
+}
 
 
-def quote_asset(symbol: str) -> str:
+def quote_asset(symbol: str, exchange: str = "binance") -> str:
     """Bepaal de quote-valuta van een handelspaar, bv. BTCUSDT → USDT."""
     symbol = symbol.upper()
-    for asset in QUOTE_ASSETS:
+    for asset in QUOTE_ASSETS.get(exchange, QUOTE_ASSETS["binance"]):
         if symbol.endswith(asset):
             return asset
-    raise ValueError(f"kan quote-valuta niet bepalen voor {symbol}")
+    raise ValueError(f"kan quote-valuta niet bepalen voor {symbol} op {exchange}")
 
 
 class TradeBot:
-    def __init__(self, config: BotConfig, exchange: BinanceExchange | None = None,
+    def __init__(self, config: BotConfig, exchange=None,
                  notifier=None, state_file: str | None = None):
         config.validate()
         self.config = config
         self.exchange = exchange
+        self.market = get_market(config.exchange)
         self.notifier = notifier
         self.state_file = state_file
         self.active_strategy = "sma_cross" if config.strategy == "auto" else config.strategy
         self.strategy = build_strategy(replace(config, strategy=self.active_strategy))
         self.portfolio = Portfolio(cash=config.start_cash, fee_rate=config.fee_rate)
-        self.quote = quote_asset(config.symbol)
+        self.quote = quote_asset(config.symbol, config.exchange)
         self.paused = False
         self.last_price: float | None = None
         self.equity_history: deque[float] = deque(maxlen=288)  # ~24u bij 5min-polls
@@ -113,7 +120,7 @@ class TradeBot:
         """Backtest alle strategieën op recente data en kies de beste."""
         self._last_relearn = time.monotonic()
         cfg = self.config
-        candles = fetch_candles(cfg.symbol, cfg.interval, limit=500)
+        candles = self.market.fetch_candles(cfg.symbol, cfg.interval, limit=500)
         results = {}
         for name in STRATEGY_NAMES:
             try:
@@ -141,7 +148,7 @@ class TradeBot:
         cfg = self.config
         self._maybe_relearn()
         lookback = max(cfg.slow_period, cfg.rsi_period, cfg.macd_slow + cfg.macd_signal)
-        candles = fetch_candles(cfg.symbol, cfg.interval, limit=lookback + 50)
+        candles = self.market.fetch_candles(cfg.symbol, cfg.interval, limit=lookback + 50)
         closes = [c.close for c in candles]
         price = closes[-1]
         self.last_price = price

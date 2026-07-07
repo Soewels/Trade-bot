@@ -10,12 +10,21 @@ from trade_bot.bot import TradeBot, quote_asset
 from trade_bot.config import BotConfig
 from trade_bot.data import Candle
 from trade_bot.exchange import BinanceExchange, ExchangeError, Fill
+from trade_bot.kraken import KrakenExchange, parse_ohlc
+from trade_bot.kraken import fetch_candles as kraken_fetch_candles
+from trade_bot.market import Market, get_market
 from trade_bot.notify import TelegramNotifier
 from trade_bot.state import load_state, save_state
 from trade_bot.webapp import Dashboard
 from trade_bot.indicators import ema, macd, rsi, sma
 from trade_bot.portfolio import Portfolio
 from trade_bot.strategy import MacdStrategy, RsiStrategy, Signal, SmaCrossStrategy
+
+
+def patch_market(bot, candles):
+    """Vervang de marktdata van een bot door vaste candles (geen netwerk)."""
+    fake = Market("test", lambda *a, **k: candles, lambda *a, **k: candles[-1].close)
+    return mock.patch.object(bot, "market", fake)
 
 
 def make_candles(closes: list[float]) -> list[Candle]:
@@ -198,6 +207,66 @@ class TestExchange(unittest.TestCase):
             quote_asset("BTCXYZQ")
 
 
+class TestKraken(unittest.TestCase):
+    # officieel voorbeeld uit https://docs.kraken.com/rest/#section/Authentication
+    DOC_SECRET = ("kQH5HW/8p1uGOVjbgWA7FunAmGO8lsSUXNsu3eow76sz84Q18fWxnyRzBHCd3pd5"
+                  "nE9qa99HAZtuZuj6F1huXg==")
+
+    def test_signature_matches_kraken_docs_example(self):
+        exchange = KrakenExchange(api_key="key", api_secret=self.DOC_SECRET)
+        nonce = "1616492376594"
+        postdata = ("nonce=1616492376594&ordertype=limit&pair=XBTUSD"
+                    "&price=37500&type=buy&volume=1.25")
+        self.assertEqual(
+            exchange.sign("/0/private/AddOrder", postdata, nonce),
+            "4/dpxb3iT4tp/ZCVEwSnEsLxx0bqyhLpdfOpc6fn7OR8+UClSV5n9E6aSS8MPtnRfp32bAb0nmbRn6H8ndwLUQ==",
+        )
+
+    def test_invalid_secret_rejected(self):
+        with self.assertRaises(ValueError):
+            KrakenExchange(api_key="key", api_secret="geen-base64!!")
+        with self.assertRaises(ValueError):
+            KrakenExchange(api_key="", api_secret=self.DOC_SECRET)
+
+    def test_parse_ohlc(self):
+        rows = [[1700000000, "100.0", "105.0", "99.0", "102.0", "101.0", "12.5", 42]]
+        candles = parse_ohlc(rows)
+        self.assertEqual(len(candles), 1)
+        self.assertEqual(candles[0].close, 102.0)
+        self.assertEqual(candles[0].volume, 12.5)
+        self.assertEqual(candles[0].open_time.year, 2023)
+
+    def test_unsupported_interval_rejected(self):
+        with self.assertRaises(ValueError):
+            kraken_fetch_candles("XBTUSD", interval="3m")
+
+    def test_free_balance_handles_kraken_asset_names(self):
+        exchange = KrakenExchange(api_key="key", api_secret=self.DOC_SECRET)
+        balances = {"ZUSD": "150.5", "XXBT": "0.25", "USDT": "42.0"}
+        with mock.patch.object(exchange, "_private", return_value=balances):
+            self.assertEqual(exchange.free_balance("USD"), 150.5)
+            self.assertEqual(exchange.free_balance("BTC"), 0.25)
+            self.assertEqual(exchange.free_balance("USDT"), 42.0)
+            self.assertEqual(exchange.free_balance("EUR"), 0.0)
+
+    def test_round_quantity_uses_lot_decimals(self):
+        exchange = KrakenExchange(api_key="key", api_secret=self.DOC_SECRET)
+        exchange._filters["XBTUSD"] = {"step_size": "0.001", "min_qty": "0.0001",
+                                       "min_notional": "0.5", "pair_key": "XXBTZUSD"}
+        self.assertAlmostEqual(exchange.round_quantity("XBTUSD", 0.123456), 0.123)
+
+    def test_get_market(self):
+        self.assertEqual(get_market("binance").name, "binance")
+        self.assertEqual(get_market("kraken").name, "kraken")
+        with self.assertRaises(ValueError):
+            get_market("bitvavo")
+
+    def test_bot_uses_kraken_market(self):
+        bot = TradeBot(BotConfig(exchange="kraken", symbol="XBTUSD"))
+        self.assertEqual(bot.market.name, "kraken")
+        self.assertEqual(bot.quote, "USD")
+
+
 class TestLiveBot(unittest.TestCase):
     @staticmethod
     def _candles_with_buy_signal(config: BotConfig) -> list[Candle]:
@@ -216,7 +285,7 @@ class TestLiveBot(unittest.TestCase):
         exchange = FakeExchange(balance=1000.0, price=100.0)
         bot = TradeBot(config, exchange=exchange)
         candles = self._candles_with_buy_signal(config)
-        with mock.patch("trade_bot.bot.fetch_candles", return_value=candles):
+        with patch_market(bot, candles):
             bot.step()
         self.assertEqual(len(exchange.orders), 1)
         side, amount = exchange.orders[0]
@@ -237,7 +306,7 @@ class TestLiveBot(unittest.TestCase):
         config = BotConfig(strategy="sma_cross", fast_period=5, slow_period=20)
         bot = TradeBot(config)  # geen exchange
         candles = self._candles_with_buy_signal(config)
-        with mock.patch("trade_bot.bot.fetch_candles", return_value=candles):
+        with patch_market(bot, candles):
             bot.step()
         self.assertTrue(bot.portfolio.in_position)  # paper-aankoop gedaan
 
@@ -337,7 +406,7 @@ class TestAutoStrategy(unittest.TestCase):
                        key=lambda n: run_backtest(candles, replace(config, strategy=n))
                        .total_return_pct)
 
-        with mock.patch("trade_bot.bot.fetch_candles", return_value=candles):
+        with patch_market(bot, candles):
             bot.relearn()
         self.assertEqual(bot.active_strategy, expected)
 
@@ -368,7 +437,7 @@ class TestAutoStrategy(unittest.TestCase):
         config = BotConfig(strategy="sma_cross", fast_period=5, slow_period=20)
         bot = TradeBot(config, notifier=FakeNotifier())
         candles = TestLiveBot._candles_with_buy_signal(config)
-        with mock.patch("trade_bot.bot.fetch_candles", return_value=candles):
+        with patch_market(bot, candles):
             bot.step()
         self.assertTrue(any("Gekocht" in m for m in messages))
 

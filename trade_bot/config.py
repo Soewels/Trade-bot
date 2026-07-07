@@ -6,7 +6,8 @@ from dataclasses import dataclass, field
 @dataclass
 class BotConfig:
     # Markt
-    symbol: str = "BTCUSDT"          # handelspaar op Binance
+    exchange: str = "binance"        # "binance" of "kraken"
+    symbol: str = "BTCUSDT"          # handelspaar (Kraken: bv. XBTUSD of XBTEUR)
     interval: str = "1h"             # candle-interval: 1m, 5m, 15m, 1h, 4h, 1d
 
     # Strategie
@@ -49,3 +50,5 @@ class BotConfig:
             raise ValueError(f"onbekende strategie: {self.strategy}")
         if self.relearn_hours <= 0:
             raise ValueError("relearn_hours moet positief zijn")
+        if self.exchange not in ("binance", "kraken"):
+            raise ValueError(f"onbekende exchange: {self.exchange}")
