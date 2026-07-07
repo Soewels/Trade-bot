@@ -18,6 +18,7 @@ from trade_bot.bot import TradeBot
 from trade_bot.config import BotConfig
 from trade_bot.data import fetch_candles, fetch_price, load_candles_csv
 from trade_bot.exchange import BinanceExchange
+from trade_bot.webapp import Dashboard, local_ip
 
 
 def build_config(args: argparse.Namespace) -> BotConfig:
@@ -148,7 +149,15 @@ def cmd_run(args: argparse.Namespace) -> int:
     if exchange is None:
         print("Paper trading — er wordt niet met echt geld gehandeld. "
               "Gebruik --testnet of --live voor echte orders.")
-    TradeBot(config, exchange=exchange).run()
+    bot = TradeBot(config, exchange=exchange)
+    if args.web is not None:
+        dashboard = Dashboard(bot, port=args.web)
+        dashboard.start()
+        print(f"\n📱 Dashboard voor op je telefoon (zelfde wifi-netwerk):")
+        print(f"   http://{local_ip()}:{dashboard.port}")
+        print(f"   Toegangscode voor de knoppen: {dashboard.token}")
+        print(f"   Tip: 'Toevoegen aan beginscherm' in je browser maakt er een app van.\n")
+    bot.run()
     return 0
 
 
@@ -183,6 +192,9 @@ def main(argv: list[str] | None = None) -> int:
                        help="echte orders met ECHT GELD (vraagt bevestiging)")
     p_run.add_argument("--max-order", type=float, default=100.0,
                        help="max bedrag per live aankoop in quote-valuta (standaard 100)")
+    p_run.add_argument("--web", type=int, nargs="?", const=8080, default=None,
+                       metavar="POORT",
+                       help="start het mobiele dashboard (standaardpoort 8080)")
     p_run.set_defaults(func=cmd_run)
 
     p_price = sub.add_parser("price", help="huidige prijs opvragen")

@@ -12,6 +12,7 @@ paper-modus: geen API-key nodig, geen echt geld.
 - 📝 **Paper trading**: live bot-loop die orders simuleert met een virtueel portfolio
 - 💸 **Echt handelen** (optioneel): market orders via de Binance API, eerst op het gratis
   testnet, daarna live — met bestedingslimiet per order en expliciete bevestiging
+- 📱 **Mobiel dashboard**: volg de bot op je telefoon, met pauze- en noodstopknop
 - 🛡️ **Risicobeheer**: stop-loss en take-profit per positie, handelskosten worden meegerekend
 - 📂 **CSV-support**: backtest ook op eigen data (`timestamp,open,high,low,close,volume`)
 
@@ -89,6 +90,33 @@ Veiligheidsgrendels in live-modus:
 
 Begin klein: `--max-order 25 --cash 100` betekent maximaal €100 aan totale blootstelling.
 
+### Dashboard op je telefoon
+
+Start de bot met `--web` erbij (werkt in paper-, testnet- en live-modus):
+
+```bash
+python main.py run --symbol BTCUSDT --interval 15m --web
+```
+
+De terminal toont dan iets als:
+
+```
+📱 Dashboard voor op je telefoon (zelfde wifi-netwerk):
+   http://192.168.1.23:8080
+   Toegangscode voor de knoppen: a1b2c3
+```
+
+Open dat adres in de browser van je telefoon (telefoon en computer moeten op
+hetzelfde wifi-netwerk zitten) en kies **"Toevoegen aan beginscherm"** — dan
+staat de bot als app-icoon op je telefoon. Je ziet live je totale waarde,
+rendement, positie en trades, en je kunt de bot **pauzeren** of met de
+**noodstop** alles direct verkopen. Voor die knoppen is de toegangscode uit de
+terminal nodig; meekijken kan zonder code.
+
+Draai je de bot op een VPS in plaats van thuis, gebruik dan een SSH-tunnel
+(`ssh -L 8080:localhost:8080 gebruiker@server`) of een dienst als Tailscale —
+zet het dashboard niet onbeschermd open op het publieke internet.
+
 ### Huidige prijs
 
 ```bash
@@ -112,6 +140,7 @@ python main.py price --symbol BTCUSDT
 | `--testnet` | uit | echte orders op het Binance-testnet (nepgeld) |
 | `--live` | uit | echte orders met echt geld (vraagt bevestiging) |
 | `--max-order` | 100 | max bedrag per live aankoop |
+| `--web` | uit | mobiel dashboard op poort 8080 (of `--web 9000`) |
 
 ## Hoe werken de strategieën?
 
@@ -139,6 +168,7 @@ trade_bot/
 ├── portfolio.py   # portfolio-boekhouding met risicobeheer
 ├── exchange.py    # Binance-koppeling voor echte orders (testnet/live)
 ├── backtest.py    # backtester met statistieken
+├── webapp.py      # mobiel dashboard (webserver)
 └── bot.py         # trading-loop (paper, testnet of live)
 main.py            # command-line interface
 tests/             # unit tests

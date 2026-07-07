@@ -7,6 +7,7 @@ Bij live handelen geldt max_order als bestedingslimiet per aankoop.
 
 import logging
 import time
+from collections import deque
 
 from .config import BotConfig
 from .data import fetch_candles
@@ -35,10 +36,14 @@ class TradeBot:
         self.exchange = exchange
         self.strategy = build_strategy(config)
         self.portfolio = Portfolio(cash=config.start_cash, fee_rate=config.fee_rate)
+        self.quote = quote_asset(config.symbol)
+        self.paused = False
+        self.last_price: float | None = None
+        self.equity_history: deque[float] = deque(maxlen=288)  # ~24u bij 5min-polls
         self._running = False
 
         if exchange is not None:
-            asset = quote_asset(config.symbol)
+            asset = self.quote
             free = exchange.free_balance(asset)
             budget = min(config.start_cash, free)
             if budget <= 0:
@@ -52,6 +57,21 @@ class TradeBot:
     def live(self) -> bool:
         return self.exchange is not None
 
+    @property
+    def mode(self) -> str:
+        if not self.live:
+            return "PAPER"
+        return "TESTNET" if self.exchange.testnet else "LIVE"
+
+    def panic(self) -> None:
+        """Noodstop: verkoop een eventuele open positie en pauzeer de bot."""
+        self.paused = True
+        if self.portfolio.in_position and self.last_price:
+            self._execute_sell(self.last_price, "noodstop")
+            logger.warning("NOODSTOP: positie verkocht en bot gepauzeerd")
+        else:
+            logger.warning("NOODSTOP: geen open positie, bot gepauzeerd")
+
     def step(self) -> None:
         """Eén iteratie: data ophalen, signaal bepalen, eventueel handelen."""
         cfg = self.config
@@ -59,6 +79,8 @@ class TradeBot:
         candles = fetch_candles(cfg.symbol, cfg.interval, limit=lookback + 50)
         closes = [c.close for c in candles]
         price = closes[-1]
+        self.last_price = price
+        self.equity_history.append(self.portfolio.equity(price))
 
         # Risicobeheer gaat vóór het strategie-signaal
         reason = self.portfolio.check_risk(price, cfg.stop_loss, cfg.take_profit)
@@ -109,17 +131,16 @@ class TradeBot:
     def run(self) -> None:
         """Blijf draaien tot Ctrl+C. Fouten (bv. netwerk) worden gelogd en overgeslagen."""
         cfg = self.config
-        mode = "LIVE" if self.live and not (self.exchange and self.exchange.testnet) \
-            else ("TESTNET" if self.live else "PAPER")
         logger.info("Bot gestart [%s]: %s %s, strategie=%s, budget=%.2f",
-                    mode, cfg.symbol, cfg.interval, cfg.strategy, self.portfolio.cash)
+                    self.mode, cfg.symbol, cfg.interval, cfg.strategy, self.portfolio.cash)
         self._running = True
         try:
             while self._running:
-                try:
-                    self.step()
-                except Exception:
-                    logger.exception("stap mislukt, opnieuw proberen bij volgende poll")
+                if not self.paused:
+                    try:
+                        self.step()
+                    except Exception:
+                        logger.exception("stap mislukt, opnieuw proberen bij volgende poll")
                 time.sleep(cfg.poll_seconds)
         except KeyboardInterrupt:
             logger.info("Gestopt door gebruiker.")

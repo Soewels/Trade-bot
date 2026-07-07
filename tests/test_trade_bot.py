@@ -10,6 +10,7 @@ from trade_bot.bot import TradeBot, quote_asset
 from trade_bot.config import BotConfig
 from trade_bot.data import Candle
 from trade_bot.exchange import BinanceExchange, ExchangeError, Fill
+from trade_bot.webapp import Dashboard
 from trade_bot.indicators import ema, macd, rsi, sma
 from trade_bot.portfolio import Portfolio
 from trade_bot.strategy import MacdStrategy, RsiStrategy, Signal, SmaCrossStrategy
@@ -237,6 +238,73 @@ class TestLiveBot(unittest.TestCase):
         with mock.patch("trade_bot.bot.fetch_candles", return_value=candles):
             bot.step()
         self.assertTrue(bot.portfolio.in_position)  # paper-aankoop gedaan
+
+
+class TestDashboard(unittest.TestCase):
+    def _dashboard(self) -> Dashboard:
+        bot = TradeBot(BotConfig(), exchange=FakeExchange(balance=500.0))
+        dashboard = Dashboard(bot, port=0)  # poort 0 = vrije poort, server niet gestart
+        self.addCleanup(dashboard.server.server_close)
+        return dashboard
+
+    def test_status_reports_bot_state(self):
+        dashboard = self._dashboard()
+        status = dashboard.status()
+        self.assertEqual(status["mode"], "TESTNET")
+        self.assertFalse(status["paused"])
+        self.assertEqual(status["cash"], 500.0)
+        self.assertEqual(status["quote"], "USDT")
+        self.assertEqual(status["trades"], [])
+
+    def test_pause_resume_and_unknown_action(self):
+        dashboard = self._dashboard()
+        self.assertEqual(dashboard.handle_action("pause"), {"ok": True})
+        self.assertTrue(dashboard.bot.paused)
+        self.assertEqual(dashboard.handle_action("resume"), {"ok": True})
+        self.assertFalse(dashboard.bot.paused)
+        self.assertIn("error", dashboard.handle_action("hack"))
+
+    def test_panic_sells_position_and_pauses(self):
+        dashboard = self._dashboard()
+        bot = dashboard.bot
+        bot.last_price = 100.0
+        exchange = bot.exchange
+        bot.portfolio.record_buy(price=100.0, quantity=1.0, quote_spent=100.0)
+        dashboard.handle_action("panic")
+        self.assertTrue(bot.paused)
+        self.assertFalse(bot.portfolio.in_position)
+        self.assertEqual(exchange.orders[-1][0], "SELL")
+
+    def test_http_roundtrip_with_token_check(self):
+        import urllib.request
+
+        dashboard = self._dashboard()
+        dashboard.start()
+        self.addCleanup(dashboard.stop)
+        base = f"http://127.0.0.1:{dashboard.port}"
+
+        with urllib.request.urlopen(f"{base}/api/status", timeout=5) as resp:
+            status = __import__("json").loads(resp.read())
+        self.assertEqual(status["mode"], "TESTNET")
+
+        # verkeerde toegangscode → 403, bot blijft draaien
+        request = urllib.request.Request(
+            f"{base}/api/action", method="POST",
+            data=b'{"action": "pause", "token": "fout"}',
+            headers={"Content-Type": "application/json"})
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(request, timeout=5)
+        self.assertEqual(ctx.exception.code, 403)
+        self.assertFalse(dashboard.bot.paused)
+
+        # juiste toegangscode → gepauzeerd
+        body = ('{"action": "pause", "token": "%s"}' % dashboard.token).encode()
+        request = urllib.request.Request(
+            f"{base}/api/action", method="POST", data=body,
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(request, timeout=5) as resp:
+            self.assertEqual(resp.status, 200)
+        self.assertTrue(dashboard.bot.paused)
 
 
 class TestBacktest(unittest.TestCase):
