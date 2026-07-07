@@ -3,10 +3,13 @@
 import math
 import unittest
 from datetime import datetime, timedelta, timezone
+from unittest import mock
 
 from trade_bot.backtest import run_backtest
+from trade_bot.bot import TradeBot, quote_asset
 from trade_bot.config import BotConfig
 from trade_bot.data import Candle
+from trade_bot.exchange import BinanceExchange, ExchangeError, Fill
 from trade_bot.indicators import ema, macd, rsi, sma
 from trade_bot.portfolio import Portfolio
 from trade_bot.strategy import MacdStrategy, RsiStrategy, Signal, SmaCrossStrategy
@@ -128,6 +131,112 @@ class TestPortfolio(unittest.TestCase):
         self.assertEqual(p.check_risk(94.0, stop_loss=0.05, take_profit=0.15), "stop_loss")
         self.assertEqual(p.check_risk(116.0, stop_loss=0.05, take_profit=0.15), "take_profit")
         self.assertIsNone(p.check_risk(101.0, stop_loss=0.05, take_profit=0.15))
+
+
+class FakeExchange:
+    """Nep-exchange voor tests: registreert orders, raakt geen netwerk aan."""
+
+    testnet = True
+
+    def __init__(self, balance: float = 1000.0, price: float = 100.0):
+        self.balance = balance
+        self.price = price
+        self.orders: list[tuple[str, float]] = []
+
+    def free_balance(self, asset: str) -> float:
+        return self.balance
+
+    def symbol_filters(self, symbol: str) -> dict:
+        return {"step_size": "0.0001", "min_qty": "0.0001", "min_notional": "5"}
+
+    def market_buy(self, symbol: str, quote_amount: float) -> Fill:
+        self.orders.append(("BUY", quote_amount))
+        return Fill(symbol, "BUY", self.price, quote_amount / self.price, quote_amount)
+
+    def market_sell(self, symbol: str, quantity: float) -> Fill:
+        self.orders.append(("SELL", quantity))
+        return Fill(symbol, "SELL", self.price, quantity, quantity * self.price)
+
+
+class TestExchange(unittest.TestCase):
+    def test_signature_matches_binance_docs_example(self):
+        # bekend voorbeeld uit de officiële Binance API-documentatie
+        exchange = BinanceExchange(
+            api_key="vmPUZE6mv9SD5VNHk4HlWFsOr6aKE2zvsw0MuIgwCIPy6utIco14y7Ju91duEh8A",
+            api_secret="NhqPtmdSJYdKjVHjA7PZj4Mge3R5YNiP1e3UZjInClVN65XAbvqqM6A7H5fATj0j",
+        )
+        query = ("symbol=LTCBTC&side=BUY&type=LIMIT&timeInForce=GTC&quantity=1"
+                 "&price=0.1&recvWindow=5000&timestamp=1499827319559")
+        self.assertEqual(
+            exchange.sign(query),
+            "c8db56825ae71d6d79447849e617115f4a920fa2acdcab2b053c4b2838bd6b71",
+        )
+
+    def test_missing_keys_rejected(self):
+        with self.assertRaises(ValueError):
+            BinanceExchange(api_key="", api_secret="")
+
+    def test_round_quantity_floors_to_step(self):
+        exchange = BinanceExchange(api_key="k", api_secret="s")
+        exchange._filters["BTCUSDT"] = {"step_size": "0.001", "min_qty": "0.001",
+                                        "min_notional": "5"}
+        self.assertAlmostEqual(exchange.round_quantity("BTCUSDT", 0.123456), 0.123)
+        self.assertAlmostEqual(exchange.round_quantity("BTCUSDT", 0.0009), 0.0)
+
+    def test_fill_from_order_rejects_empty_execution(self):
+        with self.assertRaises(ExchangeError):
+            BinanceExchange._fill_from_order(
+                {"symbol": "BTCUSDT", "executedQty": "0", "cummulativeQuoteQty": "0"}, "BUY")
+
+    def test_quote_asset_detection(self):
+        self.assertEqual(quote_asset("BTCUSDT"), "USDT")
+        self.assertEqual(quote_asset("ethbtc"), "BTC")
+        with self.assertRaises(ValueError):
+            quote_asset("BTCXYZQ")
+
+
+class TestLiveBot(unittest.TestCase):
+    @staticmethod
+    def _candles_with_buy_signal(config: BotConfig) -> list[Candle]:
+        """Serie die precies op de laatste candle een SMA-koopsignaal geeft."""
+        from trade_bot.strategy import Signal, build_strategy
+        closes = [100.0 - i for i in range(30)] + [80.0 + 3 * i for i in range(15)]
+        strategy = build_strategy(config)
+        for i in range(len(closes)):
+            if strategy.signal(closes[: i + 1]) is Signal.BUY:
+                return make_candles(closes[: i + 1])
+        raise AssertionError("geen koopsignaal in testreeks")
+
+    def test_live_buy_routes_through_exchange(self):
+        config = BotConfig(strategy="sma_cross", fast_period=5, slow_period=20,
+                           start_cash=1000.0, max_order=50.0)
+        exchange = FakeExchange(balance=1000.0, price=100.0)
+        bot = TradeBot(config, exchange=exchange)
+        candles = self._candles_with_buy_signal(config)
+        with mock.patch("trade_bot.bot.fetch_candles", return_value=candles):
+            bot.step()
+        self.assertEqual(len(exchange.orders), 1)
+        side, amount = exchange.orders[0]
+        self.assertEqual(side, "BUY")
+        self.assertLessEqual(amount, config.max_order)  # bestedingslimiet gerespecteerd
+        self.assertTrue(bot.portfolio.in_position)
+
+    def test_live_budget_capped_by_exchange_balance(self):
+        config = BotConfig(start_cash=10_000.0)
+        bot = TradeBot(config, exchange=FakeExchange(balance=250.0))
+        self.assertAlmostEqual(bot.portfolio.cash, 250.0)
+
+    def test_live_requires_balance(self):
+        with self.assertRaises(ExchangeError):
+            TradeBot(BotConfig(), exchange=FakeExchange(balance=0.0))
+
+    def test_paper_mode_never_touches_exchange(self):
+        config = BotConfig(strategy="sma_cross", fast_period=5, slow_period=20)
+        bot = TradeBot(config)  # geen exchange
+        candles = self._candles_with_buy_signal(config)
+        with mock.patch("trade_bot.bot.fetch_candles", return_value=candles):
+            bot.step()
+        self.assertTrue(bot.portfolio.in_position)  # paper-aankoop gedaan
 
 
 class TestBacktest(unittest.TestCase):

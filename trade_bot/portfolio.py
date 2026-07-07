@@ -62,6 +62,29 @@ class Portfolio:
         self.entry_price = 0.0
         return trade
 
+    def record_buy(self, price: float, quantity: float, quote_spent: float,
+                   fee: float = 0.0, reason: str = "signal",
+                   timestamp: datetime | None = None) -> Trade:
+        """Registreer een echte (live) aankoop-fill in de boekhouding."""
+        self.cash -= quote_spent
+        self.position += quantity
+        self.entry_price = price
+        trade = Trade(timestamp or datetime.now(timezone.utc), "BUY", price, quantity, fee, reason)
+        self.trades.append(trade)
+        return trade
+
+    def record_sell(self, price: float, quantity: float, quote_received: float,
+                    fee: float = 0.0, reason: str = "signal",
+                    timestamp: datetime | None = None) -> Trade:
+        """Registreer een echte (live) verkoop-fill in de boekhouding."""
+        self.cash += quote_received
+        self.position = max(self.position - quantity, 0.0)
+        if self.position == 0:
+            self.entry_price = 0.0
+        trade = Trade(timestamp or datetime.now(timezone.utc), "SELL", price, quantity, fee, reason)
+        self.trades.append(trade)
+        return trade
+
     def check_risk(self, price: float, stop_loss: float, take_profit: float) -> str | None:
         """Geef 'stop_loss' of 'take_profit' terug als de drempel is geraakt, anders None."""
         if not self.in_position or self.entry_price <= 0:
