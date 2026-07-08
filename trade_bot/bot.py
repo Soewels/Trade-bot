@@ -231,8 +231,12 @@ class TradeBot:
         cfg = self.config
         logger.info("Bot gestart [%s]: %s %s, strategie=%s, budget=%.2f",
                     self.mode, cfg.symbol, cfg.interval, cfg.strategy, self.portfolio.cash)
-        self._notify(f"▶️ Bot gestart — strategie: {cfg.strategy}, "
-                     f"budget: {self.portfolio.cash:.2f} {self.quote}")
+        start_msg = (f"▶️ Bot gestart — strategie: {cfg.strategy}, "
+                     f"vrije cash: {self.portfolio.cash:.2f} {self.quote}")
+        if self.portfolio.in_position:
+            start_msg += (f"\n📦 Open positie: {self.portfolio.position:.6f} "
+                          f"(instap {self.portfolio.entry_price:.2f})")
+        self._notify(start_msg)
         self._running = True
         try:
             while self._running:
