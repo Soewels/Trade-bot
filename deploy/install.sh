@@ -23,7 +23,8 @@ cp -r "$REPO_DIR"/main.py "$REPO_DIR"/trade_bot "$REPO_DIR"/requirements.txt /op
 chown -R tradebot:tradebot /opt/trade-bot
 
 echo "==> Python-dependencies installeren"
-pip3 install -q -r /opt/trade-bot/requirements.txt
+# via apt i.p.v. pip: Ubuntu 24.04+ blokkeert systeembrede pip-installaties (PEP 668)
+apt-get install -yq python3-requests
 
 echo "==> Configuratiebestand klaarzetten"
 if [ ! -f /etc/trade-bot.env ]; then
