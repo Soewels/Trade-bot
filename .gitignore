@@ -5,3 +5,7 @@ venv/
 *.egg-info/
 .pytest_cache/
 bot_state.json
+.env
+alpaca_state.json
+trades.csv
+daily_pnl.csv

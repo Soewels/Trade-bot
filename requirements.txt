@@ -1,1 +1,4 @@
 requests>=2.28
+
+# Alpaca multi-instrument bot (bot/)
+alpaca-trade-api>=3.0
