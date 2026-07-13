@@ -1,13 +1,18 @@
-"""Alpaca multi-instrument trading bot — main loop.
+"""Multi-instrument trading bot — main loop.
 
-Runs three strategies on five instruments:
-  - mean reversion on SPY & QQQ (15-minute candles)
-  - momentum breakout on BTC/USD (1-hour candles)
-  - trend following on GLD & USO (4-hour candles)
+Runs three strategies on five instruments, on the market chosen with
+BOT_MARKET in .env:
+
+  eu (default): mean reversion on SXR8 & SXRV, breakout on BTC/EUR,
+                trend following on 4GLD & OD7F — UCITS ETFs/ETCs in EUR
+                via Interactive Brokers, BTC/EUR via Kraken.
+  us:           the same strategies on SPY, QQQ, BTC/USD, GLD and USO
+                via Alpaca.
 
 The loop wakes every POLL_SECONDS to check hard/trailing stops against the
 latest price, and evaluates each strategy whenever one of its candles has
-closed. Equities only trade during regular market hours; crypto runs 24/7.
+closed. Equities only trade during their exchange's market hours; crypto
+runs 24/7.
 
 Run from the project root:  python -m bot.main
 """
@@ -15,14 +20,14 @@ Run from the project root:  python -m bot.main
 import logging
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config
+from bot.brokers import BrokerError, build_brokers
 from bot.indicators import atr_last
 from bot.models import Bar, Signal
 from bot.portfolio import Portfolio
@@ -31,14 +36,7 @@ from bot.strategies import (MeanReversionStrategy, MomentumBreakoutStrategy,
                             TrendFollowingStrategy)
 from bot.strategies.base import Strategy
 
-try:
-    from alpaca_trade_api.rest import REST, APIError, TimeFrame, TimeFrameUnit
-except ImportError:  # pragma: no cover
-    sys.exit("alpaca-trade-api is not installed. Run: pip install alpaca-trade-api")
-
 log = logging.getLogger("alpaca_bot")
-
-NY_TZ = ZoneInfo("America/New_York")
 
 
 def build_strategies() -> list[Strategy]:
@@ -59,18 +57,14 @@ def build_strategies() -> list[Strategy]:
     ]
 
 
-def alpaca_timeframe(minutes: int) -> "TimeFrame":
-    if minutes % 60 == 0:
-        return TimeFrame(minutes // 60, TimeFrameUnit.Hour)
-    return TimeFrame(minutes, TimeFrameUnit.Minute)
-
-
 class Bot:
-    def __init__(self, api: REST):
-        self.api = api
+    def __init__(self, brokers):
+        """`brokers` maps each tradable symbol to a broker instance."""
+        self.brokers = brokers
         self.strategies = build_strategies()
-        self.risk = RiskManager(config.RISK_PER_TRADE, config.MAX_NOTIONAL_FRACTION)
-        self.portfolio = Portfolio(api, config.CRYPTO_SYMBOLS, config.STATE_FILE,
+        self.risk = RiskManager(config.RISK_PER_TRADE, config.MAX_NOTIONAL_FRACTION,
+                                risk_on_pair=config.RISK_ON_PAIR)
+        self.portfolio = Portfolio(brokers, config.STATE_FILE,
                                    config.TRADES_CSV, config.DAILY_PNL_CSV)
         # last evaluated candle bucket per (strategy, symbol)
         self.last_bucket: dict[tuple[str, str], int] = {}
@@ -78,53 +72,23 @@ class Bot:
     # --- market data ----------------------------------------------------------
 
     def fetch_bars(self, symbol: str, timeframe_minutes: int) -> list[Bar]:
-        """Fetch recent candles, oldest first, excluding the in-progress one."""
-        timeframe = alpaca_timeframe(timeframe_minutes)
-        if self.portfolio.is_crypto(symbol):
-            raw = self.api.get_crypto_bars(symbol, timeframe,
-                                           limit=config.BAR_FETCH_LIMIT)
-        else:
-            raw = self.api.get_bars(symbol, timeframe, limit=config.BAR_FETCH_LIMIT,
-                                    feed=config.ALPACA_DATA_FEED)
+        """Recent candles, oldest first, excluding the in-progress one."""
+        raw = self.brokers[symbol].fetch_bars(symbol, timeframe_minutes,
+                                              config.BAR_FETCH_LIMIT)
         bucket_seconds = timeframe_minutes * 60
         current_bucket_start = (time.time() // bucket_seconds) * bucket_seconds
-        bars = []
-        for item in raw:
-            ts = item.t.timestamp()
-            if ts >= current_bucket_start:
-                continue  # candle still forming
-            bars.append(Bar(ts=ts, open=float(item.o), high=float(item.h),
-                            low=float(item.l), close=float(item.c),
-                            volume=float(item.v)))
-        return bars
-
-    def latest_price(self, symbol: str) -> Optional[float]:
-        try:
-            if self.portfolio.is_crypto(symbol):
-                raw = self.api.get_crypto_bars(symbol, TimeFrame.Minute, limit=1)
-                bars = list(raw)
-                return float(bars[-1].c) if bars else None
-            return float(self.api.get_latest_trade(symbol).price)
-        except Exception as exc:
-            log.warning("no latest price for %s: %s", symbol, exc)
-            return None
-
-    def market_open(self) -> bool:
-        try:
-            return bool(self.api.get_clock().is_open)
-        except Exception as exc:
-            log.warning("could not read market clock, treating as closed: %s", exc)
-            return False
+        return [bar for bar in raw if bar.ts < current_bucket_start]
 
     # --- trading --------------------------------------------------------------
 
-    def check_stops(self, equities_open: bool) -> None:
+    def check_stops(self) -> None:
         """Every loop: update trailing stops and close positions whose stop is hit."""
         changed = False
         for symbol, state in list(self.portfolio.positions.items()):
-            if not self.portfolio.is_crypto(symbol) and not equities_open:
+            broker = self.brokers[symbol]
+            if not broker.market_open(symbol):
                 continue  # cannot execute an exit while the market is closed
-            price = self.latest_price(symbol)
+            price = broker.latest_price(symbol)
             if price is None:
                 continue
             self.risk.update_trailing_stop(state, price)
@@ -136,7 +100,7 @@ class Bot:
         if changed:
             self.portfolio.save()
 
-    def evaluate_strategies(self, equities_open: bool) -> None:
+    def evaluate_strategies(self) -> None:
         now = time.time()
         for strategy in self.strategies:
             bucket_seconds = strategy.timeframe_minutes * 60
@@ -145,7 +109,7 @@ class Bot:
                 key = (strategy.name, symbol)
                 if self.last_bucket.get(key) == bucket:
                     continue  # this candle was already handled
-                if not self.portfolio.is_crypto(symbol) and not equities_open:
+                if not self.brokers[symbol].market_open(symbol):
                     continue  # no fresh bars and no fills outside market hours
                 self.last_bucket[key] = bucket
                 try:
@@ -176,6 +140,7 @@ class Bot:
 
     def execute(self, strategy: Strategy, symbol: str, signal: Signal,
                 bars: list[Bar]) -> None:
+        broker = self.brokers[symbol]
         side = self.portfolio.position_side(symbol)
 
         if signal.action == "exit":
@@ -183,13 +148,14 @@ class Bot:
                 self.portfolio.close_position(symbol, signal.reason)
             return
 
-        if signal.action == "short" and self.portfolio.is_crypto(symbol):
-            # Alpaca does not support shorting crypto: treat as exit-long.
+        if signal.action == "short" and not broker.supports_short(symbol):
+            # e.g. crypto spot, or a cash account without shorting rights:
+            # a short signal then only means "get out of the long".
             if side == "long":
                 self.portfolio.close_position(symbol, f"breakdown exit: {signal.reason}")
             else:
-                log.info("short signal on %s ignored (crypto shorts not supported)",
-                         symbol)
+                log.info("short signal on %s ignored (%s does not allow shorts)",
+                         symbol, broker.name)
             return
 
         if side == signal.action:
@@ -198,11 +164,11 @@ class Bot:
             # Reversal: close the opposite position first.
             self.portfolio.close_position(symbol, f"reversal: {signal.reason}")
 
-        if (signal.action == "long" and self.portfolio.is_crypto(symbol)
+        if (signal.action == "long" and symbol == config.CORRELATION_BLOCKED_SYMBOL
                 and self.risk.correlation_blocks_crypto_long(
                     self.portfolio.position_sides())):
-            log.info("correlation filter: SPY and QQQ are both long, "
-                     "blocking new %s long", symbol)
+            log.info("correlation filter: %s and %s are both long, "
+                     "blocking new %s long", *config.RISK_ON_PAIR, symbol)
             return
 
         atr = atr_last(bars, config.ATR_PERIOD)
@@ -210,13 +176,13 @@ class Bot:
             log.warning("no valid ATR for %s, skipping entry", symbol)
             return
         try:
-            equity = self.portfolio.equity()
-            buying_power = self.portfolio.buying_power(symbol)
+            equity = self.portfolio.total_equity()
+            buying_power = broker.buying_power(symbol)
         except Exception as exc:
             log.error("could not read account for %s entry: %s", symbol, exc)
             return
         qty = self.risk.position_size(equity, bars[-1].close, atr, buying_power,
-                                      fractional=self.portfolio.is_crypto(symbol))
+                                      fractional=broker.allows_fractional(symbol))
         self.portfolio.open_position(
             symbol, signal.action, qty, strategy.name, atr,
             stop_price_fn=lambda fill: self.risk.hard_stop_price(
@@ -226,12 +192,12 @@ class Bot:
     # --- daily P&L --------------------------------------------------------------
 
     def roll_daily_pnl(self) -> None:
-        today = datetime.now(NY_TZ).date().isoformat()
+        today = datetime.now(ZoneInfo(config.TIMEZONE)).date().isoformat()
         meta = self.portfolio.meta
         if meta.get("day") == today:
             return
         try:
-            equity = self.portfolio.equity()
+            equity = self.portfolio.total_equity()
         except Exception as exc:
             log.warning("could not read equity for daily P&L: %s", exc)
             return
@@ -247,22 +213,21 @@ class Bot:
     # --- main loop ----------------------------------------------------------------
 
     def run(self) -> None:
-        account = self.api.get_account()
-        log.info("connected to Alpaca (%s): equity=%s buying_power=%s",
-                 config.ALPACA_BASE_URL, account.equity, account.buying_power)
+        log.info("market profile: %s — instruments: %s",
+                 config.BOT_MARKET, ", ".join(config.INSTRUMENTS))
+        log.info("total equity across brokers: %.2f", self.portfolio.total_equity())
         self.portfolio.reconcile()
         backoff = config.POLL_SECONDS
         while True:
             try:
-                equities_open = self.market_open()
                 self.roll_daily_pnl()
-                self.check_stops(equities_open)
-                self.evaluate_strategies(equities_open)
+                self.check_stops()
+                self.evaluate_strategies()
                 backoff = config.POLL_SECONDS
             except KeyboardInterrupt:
                 raise
-            except (APIError, ConnectionError, OSError) as exc:
-                log.error("API error, retrying in %ds: %s", backoff, exc)
+            except (BrokerError, ConnectionError, OSError) as exc:
+                log.error("broker error, retrying in %ds: %s", backoff, exc)
                 backoff = min(backoff * 2, 300)
             except Exception:
                 log.exception("unexpected error, retrying in %ds", backoff)
@@ -274,12 +239,14 @@ def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    if not config.ALPACA_API_KEY or not config.ALPACA_API_SECRET:
-        sys.exit("Set ALPACA_API_KEY and ALPACA_API_SECRET in .env "
-                 "(see .env.example)")
-    api = REST(config.ALPACA_API_KEY, config.ALPACA_API_SECRET,
-               config.ALPACA_BASE_URL)
-    bot = Bot(api)
+    if config.BOT_MARKET == "us" and not (config.ALPACA_API_KEY
+                                          and config.ALPACA_API_SECRET):
+        sys.exit("BOT_MARKET=us requires ALPACA_API_KEY and ALPACA_API_SECRET "
+                 "in .env (see .env.example)")
+    brokers = build_brokers(config)
+    for broker in set(brokers.values()):
+        broker.connect()
+    bot = Bot(brokers)
     try:
         bot.run()
     except KeyboardInterrupt:

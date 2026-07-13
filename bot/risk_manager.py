@@ -14,11 +14,13 @@ from .models import PositionState
 
 class RiskManager:
     def __init__(self, risk_per_trade: float = 0.01,
-                 max_notional_fraction: float = 0.95):
+                 max_notional_fraction: float = 0.95,
+                 risk_on_pair: tuple[str, str] = ("SPY", "QQQ")):
         if not 0 < risk_per_trade < 1:
             raise ValueError("risk_per_trade must be between 0 and 1")
         self.risk_per_trade = risk_per_trade
         self.max_notional_fraction = max_notional_fraction
+        self.risk_on_pair = tuple(risk_on_pair)
 
     def position_size(self, equity: float, price: float, atr: float,
                       buying_power: float, fractional: bool) -> float:
@@ -63,10 +65,12 @@ class RiskManager:
 
     def correlation_blocks_crypto_long(
             self, position_sides: dict[str, Optional[str]]) -> bool:
-        """If SPY and QQQ are both long, block new BTC/USD longs.
+        """If both risk-on equity trackers (SPY/QQQ, or their European
+        equivalents) are long, block new crypto longs.
 
         Prevents stacking a third risk-on position on top of two that
         already move together.
         """
-        return (position_sides.get("SPY") == "long"
-                and position_sides.get("QQQ") == "long")
+        first, second = self.risk_on_pair
+        return (position_sides.get(first) == "long"
+                and position_sides.get(second) == "long")

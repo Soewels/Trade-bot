@@ -1,4 +1,7 @@
 requests>=2.28
 
-# Alpaca multi-instrument bot (bot/)
-alpaca-trade-api>=3.0
+# Multi-instrument bot (bot/) — EU profile (Interactive Brokers)
+ib_async>=1.0
+
+# Multi-instrument bot (bot/) — US profile (Alpaca); only needed with BOT_MARKET=us
+# alpaca-trade-api>=3.0

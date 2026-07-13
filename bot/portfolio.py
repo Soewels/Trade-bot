@@ -1,18 +1,18 @@
-"""Portfolio: Alpaca account/order access, position bookkeeping and CSV logs.
+"""Portfolio: order routing via brokers, position bookkeeping and CSV logs.
 
 Keeps its own PositionState per instrument (entry, stop, trailing data,
 which strategy owns it) in a JSON file so the bot is restart-safe, and
-reconciles that state against the real Alpaca positions on startup.
+reconciles that state against the brokers' real positions on startup.
 """
 
 import csv
 import json
 import logging
 import os
-import time
 from datetime import datetime, timezone
 from typing import Optional
 
+from .brokers.base import Broker, BrokerError
 from .models import PositionState
 
 log = logging.getLogger("alpaca_bot.portfolio")
@@ -22,16 +22,11 @@ TRADES_FIELDS = ["timestamp", "instrument", "direction", "entry_price",
 DAILY_FIELDS = ["date", "start_equity", "end_equity", "pnl"]
 
 
-def normalize_symbol(symbol: str) -> str:
-    """Alpaca reports crypto positions as 'BTCUSD' while orders use 'BTC/USD'."""
-    return symbol.replace("/", "")
-
-
 class Portfolio:
-    def __init__(self, api, crypto_symbols: set[str], state_file: str,
+    def __init__(self, brokers: dict[str, Broker], state_file: str,
                  trades_csv: str, daily_pnl_csv: str):
-        self.api = api
-        self.crypto_symbols = set(crypto_symbols)
+        """`brokers` maps each tradable symbol to its broker instance."""
+        self.brokers = brokers
         self.state_file = state_file
         self.trades_csv = trades_csv
         self.daily_pnl_csv = daily_pnl_csv
@@ -39,21 +34,14 @@ class Portfolio:
         self.meta: dict = {}          # day-rollover bookkeeping etc.
         self._load_state()
 
+    def broker_for(self, symbol: str) -> Broker:
+        return self.brokers[symbol]
+
     # --- account ------------------------------------------------------------
 
-    def equity(self) -> float:
-        return float(self.api.get_account().equity)
-
-    def buying_power(self, symbol: str) -> float:
-        account = self.api.get_account()
-        if self.is_crypto(symbol):
-            # Crypto is non-marginable: only settled cash can be used.
-            value = getattr(account, "non_marginable_buying_power", None) or account.cash
-            return float(value)
-        return float(account.buying_power)
-
-    def is_crypto(self, symbol: str) -> bool:
-        return symbol in self.crypto_symbols
+    def total_equity(self) -> float:
+        """Combined account value across all connected brokers."""
+        return sum(broker.equity() for broker in set(self.brokers.values()))
 
     def position_side(self, symbol: str) -> Optional[str]:
         state = self.positions.get(symbol)
@@ -65,22 +53,16 @@ class Portfolio:
     # --- startup reconciliation ----------------------------------------------
 
     def reconcile(self) -> None:
-        """Drop state for positions that no longer exist at Alpaca and warn
-        about live positions the bot has no state for (it will not touch those)."""
-        try:
-            live = {normalize_symbol(p.symbol): p for p in self.api.list_positions()}
-        except Exception as exc:
-            log.warning("could not list Alpaca positions during reconcile: %s", exc)
-            return
-        for symbol in list(self.positions):
-            if normalize_symbol(symbol) not in live:
-                log.warning("state for %s has no matching Alpaca position; dropping", symbol)
-                del self.positions[symbol]
-        known = {normalize_symbol(s) for s in self.positions}
-        for sym, pos in live.items():
-            if sym not in known:
-                log.warning("Alpaca position %s (%s %s) is not managed by this bot; "
-                            "leaving it alone", sym, pos.side, pos.qty)
+        """Drop state for positions that no longer exist at the broker."""
+        for broker in set(self.brokers.values()):
+            live = broker.position_symbols()
+            if live is None:
+                continue  # broker cannot report positions; trust our state
+            for symbol in list(self.positions):
+                if self.brokers.get(symbol) is broker and symbol not in live:
+                    log.warning("state for %s has no matching %s position; "
+                                "dropping", symbol, broker.name)
+                    del self.positions[symbol]
         self._save_state()
 
     # --- orders ---------------------------------------------------------------
@@ -88,7 +70,7 @@ class Portfolio:
     def open_position(self, symbol: str, direction: str, qty: float,
                       strategy: str, atr: float, stop_price_fn,
                       trail_atr_mult: Optional[float] = None) -> Optional[PositionState]:
-        """Submit a market order to open a position and wait for the fill.
+        """Open a position with a market order and wait for the fill.
 
         `stop_price_fn(fill_price)` computes the hard stop from the actual
         fill price, so the 1%-of-equity risk is anchored to reality, not to
@@ -98,32 +80,27 @@ class Portfolio:
             log.info("skip %s %s: computed size is 0", direction, symbol)
             return None
         side = "buy" if direction == "long" else "sell"
-        tif = "gtc" if self.is_crypto(symbol) else "day"
-        order = self.api.submit_order(symbol=symbol, qty=qty, side=side,
-                                      type="market", time_in_force=tif)
-        filled = self._wait_for_fill(order.id)
-        if filled is None:
-            log.error("order %s for %s did not fill; cancelling", order.id, symbol)
-            self._try_cancel(order.id)
+        try:
+            fill = self.broker_for(symbol).submit_market_order(symbol, side, qty)
+        except BrokerError as exc:
+            log.error("could not open %s %s: %s", direction, symbol, exc)
             return None
-        fill_price = float(filled.filled_avg_price)
-        fill_qty = float(filled.filled_qty)
         state = PositionState(
             symbol=symbol,
             direction=direction,
-            qty=fill_qty,
-            entry_price=fill_price,
+            qty=fill.qty,
+            entry_price=fill.price,
             entry_time=datetime.now(timezone.utc).isoformat(),
             strategy=strategy,
             atr=atr,
-            stop_price=stop_price_fn(fill_price),
+            stop_price=stop_price_fn(fill.price),
             trail_atr_mult=trail_atr_mult,
-            peak_price=fill_price,
+            peak_price=fill.price,
         )
         self.positions[symbol] = state
         self._save_state()
         log.info("OPENED %s %s qty=%s @ %.4f stop=%.4f (%s)",
-                 direction.upper(), symbol, fill_qty, fill_price,
+                 direction.upper(), symbol, fill.qty, fill.price,
                  state.stop_price, strategy)
         return state
 
@@ -133,42 +110,21 @@ class Portfolio:
         if state is None:
             return None
         side = "sell" if state.direction == "long" else "buy"
-        tif = "gtc" if self.is_crypto(symbol) else "day"
-        order = self.api.submit_order(symbol=symbol, qty=state.qty, side=side,
-                                      type="market", time_in_force=tif)
-        filled = self._wait_for_fill(order.id)
-        if filled is None:
-            log.error("close order %s for %s did not fill; keeping state", order.id, symbol)
+        try:
+            fill = self.broker_for(symbol).submit_market_order(symbol, side, state.qty)
+        except BrokerError as exc:
+            log.error("could not close %s (keeping state): %s", symbol, exc)
             return None
-        exit_price = float(filled.filled_avg_price)
         if state.direction == "long":
-            pnl = (exit_price - state.entry_price) * state.qty
+            pnl = (fill.price - state.entry_price) * state.qty
         else:
-            pnl = (state.entry_price - exit_price) * state.qty
-        self._log_trade(state, exit_price, pnl)
+            pnl = (state.entry_price - fill.price) * state.qty
+        self._log_trade(state, fill.price, pnl)
         del self.positions[symbol]
         self._save_state()
         log.info("CLOSED %s %s qty=%s @ %.4f pnl=%.2f (%s)",
-                 state.direction.upper(), symbol, state.qty, exit_price, pnl, reason)
+                 state.direction.upper(), symbol, state.qty, fill.price, pnl, reason)
         return pnl
-
-    def _wait_for_fill(self, order_id: str, timeout: float = 60.0):
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            order = self.api.get_order(order_id)
-            if order.status == "filled":
-                return order
-            if order.status in ("canceled", "expired", "rejected"):
-                log.error("order %s ended with status %s", order_id, order.status)
-                return None
-            time.sleep(1.0)
-        return None
-
-    def _try_cancel(self, order_id: str) -> None:
-        try:
-            self.api.cancel_order(order_id)
-        except Exception as exc:
-            log.warning("could not cancel order %s: %s", order_id, exc)
 
     # --- CSV logging -----------------------------------------------------------
 
