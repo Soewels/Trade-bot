@@ -29,6 +29,19 @@ class MeanReversionStrategy(Strategy):
         self.timeframe_minutes = timeframe_minutes
         self.symbols = list(thresholds)
 
+    def add_symbol(self, symbol: str, threshold: float) -> None:
+        """Add an instrument at runtime (used by the US stock screener)."""
+        if threshold <= 0:
+            raise ValueError("threshold must be positive")
+        self.thresholds[symbol] = threshold
+        if symbol not in self.symbols:
+            self.symbols.append(symbol)
+
+    def remove_symbol(self, symbol: str) -> None:
+        self.thresholds.pop(symbol, None)
+        if symbol in self.symbols:
+            self.symbols.remove(symbol)
+
     def evaluate(self, symbol: str, bars: list[Bar],
                  position_side: Optional[str]) -> Optional[Signal]:
         closes = [b.close for b in bars]

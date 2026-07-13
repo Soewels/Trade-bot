@@ -45,6 +45,11 @@ class Broker:
     def latest_price(self, symbol: str) -> Optional[float]:
         raise NotImplementedError
 
+    def to_base_rate(self, symbol: str) -> float:
+        """Multiplier converting instrument-currency amounts to the account's
+        base currency; 1.0 when they match (the default)."""
+        return 1.0
+
     # --- venue rules -------------------------------------------------------
 
     def market_open(self, symbol: str) -> bool:

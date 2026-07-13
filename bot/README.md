@@ -89,6 +89,30 @@ strategy symbol lists) — verify the ticker/exchange combination in TWS
 first. Exchange opening hours per IBKR code are configured in
 `bot/brokers/ibkr_broker.py` (`EXCHANGE_HOURS`).
 
+### Self-screened US stocks (long & short)
+
+Individual US **stocks** are PRIIPs-exempt (unlike US ETFs), so EU retail
+can trade them freely — and they're the easiest instruments to short. The
+bot finds them itself:
+
+1. at startup (and weekly, `US_STOCK_RESCAN_DAYS`) it asks the **IBKR
+   market scanner** for the most active US stocks above `US_STOCK_MIN_PRICE`
+   and a $10B market cap;
+2. it ranks the candidates on **average daily dollar volume** computed from
+   real daily bars and keeps those above `US_STOCK_MIN_DOLLAR_VOLUME`
+   ($50M/day by default);
+3. the top `US_STOCK_COUNT` (default 3, `0` = off) join the mean-reversion
+   strategy with a wider 2.0σ entry band (single stocks are noisier than
+   index trackers), long and — with `IBKR_ALLOW_SHORTS=1` and a margin
+   account — short.
+
+On a rescan, stocks with an **open position are never swapped out**; only
+flat slots are refreshed. The chosen universe is persisted in the state
+file, so a restart keeps managing existing positions. Position sizing
+converts the USD ATR to EUR at the live exchange rate, so the 1%-of-equity
+risk rule holds exactly in your account currency. US stocks trade during
+US market hours (15:30–22:00 CET).
+
 ### Notes on shorting (EU)
 
 Shorting UCITS ETFs requires an IBKR **margin account** plus borrowable

@@ -58,6 +58,18 @@ KRAKEN_API_KEY = os.environ.get("KRAKEN_API_KEY", "")
 KRAKEN_API_SECRET = os.environ.get("KRAKEN_API_SECRET", "")
 KRAKEN_PAPER_CASH = float(os.environ.get("KRAKEN_PAPER_CASH", "10000"))
 
+# --- US stock screener (eu profile, needs IBKR) ---------------------------------------
+# The bot finds liquid US stocks itself via the IBKR market scanner and adds
+# them to the mean-reversion strategy (individual US stocks are PRIIPs-exempt,
+# unlike US ETFs). Set US_STOCK_COUNT=0 to disable.
+US_STOCK_COUNT = int(os.environ.get("US_STOCK_COUNT", "3"))
+US_STOCK_THRESHOLD = 2.0            # entry threshold in std devs (wider: single
+                                    # stocks are noisier than index trackers)
+US_STOCK_MIN_PRICE = 10.0           # skip penny-ish stocks
+US_STOCK_MIN_MARKET_CAP_MUSD = 10_000.0   # >= $10 billion market cap
+US_STOCK_MIN_DOLLAR_VOLUME = 50e6   # >= $50M average daily dollar volume
+US_STOCK_RESCAN_DAYS = 7            # refresh the universe weekly
+
 # --- risk management ---------------------------------------------------------------
 ATR_PERIOD = 14
 RISK_PER_TRADE = 0.01          # a 1 ATR adverse move == 1% of account equity

@@ -11,7 +11,8 @@ quotes automatically.
 """
 
 import logging
-from datetime import datetime, time as dtime
+import time
+from datetime import datetime, time as dtime, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
@@ -29,12 +30,14 @@ EXCHANGE_HOURS = {
     "SBF": (dtime(9, 0), dtime(17, 30), "Europe/Paris"),        # Euronext Paris
     "LSEETF": (dtime(8, 0), dtime(16, 30), "Europe/London"),    # LSE ETF segment
     "SMART": (dtime(9, 0), dtime(17, 30), "Europe/Berlin"),
+    "US": (dtime(9, 30), dtime(16, 0), "America/New_York"),     # NYSE/Nasdaq RTH
 }
 
 # reqHistoricalData wants a duration string; pick one that comfortably
 # covers `limit` bars of the given size (~200+ bars for the 200 EMA).
-DURATION_BY_MINUTES = {15: "10 D", 60: "60 D", 240: "1 Y"}
-BAR_SIZE_BY_MINUTES = {15: "15 mins", 60: "1 hour", 240: "4 hours"}
+DURATION_BY_MINUTES = {15: "10 D", 60: "60 D", 240: "1 Y", 1440: "3 M"}
+BAR_SIZE_BY_MINUTES = {15: "15 mins", 60: "1 hour", 240: "4 hours",
+                       1440: "1 day"}
 
 
 def exchange_is_open(exchange: str, now: Optional[datetime] = None) -> bool:
@@ -70,6 +73,8 @@ class IBKRBroker(Broker):
         self.instruments = instruments
         self.allow_shorts = allow_shorts
         self._contracts: dict[str, object] = {}
+        self._base_currency: Optional[str] = None
+        self._fx_cache: dict[str, tuple[float, float]] = {}  # ccy -> (rate, ts)
 
     def connect(self) -> None:
         self.ib.connect(self.host, self.port, clientId=self.client_id,
@@ -92,6 +97,10 @@ class IBKRBroker(Broker):
                     f"{meta.get('exchange')}: check the ticker/exchange in config.py")
             self._contracts[symbol] = qualified[0]
         return self._contracts[symbol]
+
+    def add_instrument(self, symbol: str, meta: dict) -> None:
+        """Register a (screened) instrument at runtime."""
+        self.instruments.setdefault(symbol, meta)
 
     # --- account ---------------------------------------------------------
 
@@ -125,10 +134,16 @@ class IBKRBroker(Broker):
             useRTH=True,
             formatDate=2,
         )
-        bars = [Bar(ts=item.date.timestamp(), open=float(item.open),
-                    high=float(item.high), low=float(item.low),
-                    close=float(item.close), volume=float(item.volume))
-                for item in raw]
+        bars = []
+        for item in raw:
+            if hasattr(item.date, "timestamp"):
+                ts = item.date.timestamp()
+            else:  # daily bars come back as plain dates
+                ts = datetime(item.date.year, item.date.month, item.date.day,
+                              tzinfo=timezone.utc).timestamp()
+            bars.append(Bar(ts=ts, open=float(item.open), high=float(item.high),
+                            low=float(item.low), close=float(item.close),
+                            volume=float(item.volume)))
         return bars[-limit:]
 
     def latest_price(self, symbol: str) -> Optional[float]:
@@ -147,7 +162,8 @@ class IBKRBroker(Broker):
     # --- venue rules -------------------------------------------------------
 
     def market_open(self, symbol: str) -> bool:
-        return exchange_is_open(self.instruments[symbol].get("exchange", "SMART"))
+        meta = self.instruments[symbol]
+        return exchange_is_open(meta.get("hours") or meta.get("exchange", "SMART"))
 
     def supports_short(self, symbol: str) -> bool:
         # Shorting UCITS ETFs needs a margin account and borrowable shares;
@@ -156,6 +172,69 @@ class IBKRBroker(Broker):
 
     def allows_fractional(self, symbol: str) -> bool:
         return False
+
+    # --- screener support --------------------------------------------------------
+
+    def scan_most_active(self, min_price: float, min_market_cap_musd: float,
+                         rows: int = 20) -> list[str]:
+        """Most active US stocks via the IBKR market scanner."""
+        sub = self._lib.ScannerSubscription(
+            instrument="STK", locationCode="STK.US.MAJOR",
+            scanCode="MOST_ACTIVE", numberOfRows=rows)
+        tags = [self._lib.TagValue("priceAbove", str(min_price)),
+                self._lib.TagValue("marketCapAbove1e6", str(min_market_cap_musd))]
+        results = self.ib.reqScannerData(sub, [], tags)
+        return [row.contractDetails.contract.symbol for row in results]
+
+    # --- currency conversion --------------------------------------------------------
+
+    def base_currency(self) -> str:
+        if self._base_currency is None:
+            for row in self.ib.accountSummary():
+                if row.tag == "NetLiquidation":
+                    self._base_currency = row.currency or "EUR"
+                    break
+            else:
+                self._base_currency = "EUR"
+        return self._base_currency
+
+    def to_base_rate(self, symbol: str) -> float:
+        """Multiplier converting instrument-currency amounts to the account's
+        base currency (e.g. USD prices -> EUR for a Dutch account), so that
+        ATR position sizing risks exactly 1% of equity in the right currency."""
+        currency = self.instruments[symbol].get("currency", "EUR")
+        base = self.base_currency()
+        if currency == base:
+            return 1.0
+        cached = self._fx_cache.get(currency)
+        if cached and time.time() - cached[1] < 3600:
+            return cached[0]
+        fx_price = self._fx_price(base + currency)  # e.g. EURUSD = USD per EUR
+        if not fx_price or fx_price <= 0:
+            raise BrokerError(f"no {base}{currency} FX rate available")
+        rate = 1.0 / fx_price
+        self._fx_cache[currency] = (rate, time.time())
+        return rate
+
+    def _fx_price(self, pair: str) -> Optional[float]:
+        contract = self._lib.Forex(pair)
+        try:
+            ticker = self.ib.reqMktData(contract, "", True, False)
+            self.ib.sleep(2.0)
+            price = ticker.marketPrice()
+            if price and price == price:  # not NaN
+                return float(price)
+        except Exception as exc:
+            log.warning("FX snapshot for %s failed: %s", pair, exc)
+        try:  # fallback: last daily midpoint
+            raw = self.ib.reqHistoricalData(
+                contract, endDateTime="", durationStr="2 D",
+                barSizeSetting="1 day", whatToShow="MIDPOINT", useRTH=False,
+                formatDate=2)
+            return float(raw[-1].close) if raw else None
+        except Exception as exc:
+            log.warning("FX history for %s failed: %s", pair, exc)
+            return None
 
     # --- orders ---------------------------------------------------------------
 

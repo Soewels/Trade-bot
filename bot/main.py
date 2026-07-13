@@ -20,13 +20,14 @@ Run from the project root:  python -m bot.main
 import logging
 import sys
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config
+from bot import screener
 from bot.brokers import BrokerError, build_brokers
 from bot.indicators import atr_last
 from bot.models import Bar, Signal
@@ -68,6 +69,66 @@ class Bot:
                                    config.TRADES_CSV, config.DAILY_PNL_CSV)
         # last evaluated candle bucket per (strategy, symbol)
         self.last_bucket: dict[tuple[str, str], int] = {}
+        self._restore_us_stocks()
+
+    # --- US stock screener --------------------------------------------------------
+
+    def _ibkr_broker(self):
+        return next((b for b in set(self.brokers.values()) if b.name == "ibkr"),
+                    None)
+
+    def _mean_reversion(self):
+        return next(s for s in self.strategies if s.name == "mean_reversion")
+
+    def _register_us_stock(self, symbol: str) -> None:
+        broker = self._ibkr_broker()
+        broker.add_instrument(symbol, dict(screener.US_STOCK_META))
+        self.brokers[symbol] = broker
+        self._mean_reversion().add_symbol(symbol, config.US_STOCK_THRESHOLD)
+
+    def _restore_us_stocks(self) -> None:
+        """Re-register the screened universe from state, before reconcile —
+        open positions in these stocks must stay manageable after a restart."""
+        if self._ibkr_broker() is None:
+            return
+        for symbol in self.portfolio.meta.get("us_stocks", []):
+            self._register_us_stock(symbol)
+
+    def maybe_screen_us_stocks(self) -> None:
+        """(Re)screen for liquid US stocks when the universe is stale."""
+        broker = self._ibkr_broker()
+        if config.US_STOCK_COUNT <= 0 or broker is None:
+            return
+        meta = self.portfolio.meta
+        last = meta.get("us_stocks_screened")
+        today = datetime.now(ZoneInfo(config.TIMEZONE)).date()
+        if last and (today - date.fromisoformat(last)).days < config.US_STOCK_RESCAN_DAYS:
+            return
+        meta["us_stocks_screened"] = today.isoformat()  # also on failure: no retry storm
+        self.portfolio.save()
+        try:
+            picks = screener.find_liquid_us_stocks(
+                broker, config.US_STOCK_COUNT, config.US_STOCK_MIN_PRICE,
+                config.US_STOCK_MIN_MARKET_CAP_MUSD,
+                config.US_STOCK_MIN_DOLLAR_VOLUME)
+        except Exception as exc:
+            log.warning("US stock screening failed (retry in %d days): %s",
+                        config.US_STOCK_RESCAN_DAYS, exc)
+            return
+        current = list(meta.get("us_stocks", []))
+        held = {sym for sym in current if sym in self.portfolio.positions}
+        universe = screener.merge_universe(current, held, picks,
+                                           config.US_STOCK_COUNT)
+        for symbol in current:
+            if symbol not in universe:
+                self._mean_reversion().remove_symbol(symbol)
+                self.brokers.pop(symbol, None)
+        for symbol in universe:
+            if symbol not in current:
+                self._register_us_stock(symbol)
+        meta["us_stocks"] = universe
+        self.portfolio.save()
+        log.info("US stock universe: %s", ", ".join(universe) or "empty")
 
     # --- market data ----------------------------------------------------------
 
@@ -178,10 +239,12 @@ class Bot:
         try:
             equity = self.portfolio.total_equity()
             buying_power = broker.buying_power(symbol)
+            fx = broker.to_base_rate(symbol)  # e.g. USD stock in a EUR account
         except Exception as exc:
             log.error("could not read account for %s entry: %s", symbol, exc)
             return
-        qty = self.risk.position_size(equity, bars[-1].close, atr, buying_power,
+        qty = self.risk.position_size(equity, bars[-1].close * fx, atr * fx,
+                                      buying_power,
                                       fractional=broker.allows_fractional(symbol))
         self.portfolio.open_position(
             symbol, signal.action, qty, strategy.name, atr,
@@ -220,6 +283,7 @@ class Bot:
         backoff = config.POLL_SECONDS
         while True:
             try:
+                self.maybe_screen_us_stocks()
                 self.roll_daily_pnl()
                 self.check_stops()
                 self.evaluate_strategies()
