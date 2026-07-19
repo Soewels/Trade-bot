@@ -24,15 +24,21 @@ DAILY_FIELDS = ["date", "start_equity", "end_equity", "pnl"]
 
 class Portfolio:
     def __init__(self, brokers: dict[str, Broker], state_file: str,
-                 trades_csv: str, daily_pnl_csv: str):
-        """`brokers` maps each tradable symbol to its broker instance."""
+                 trades_csv: str, daily_pnl_csv: str, notifier=None):
+        """`brokers` maps each tradable symbol to its broker instance.
+        `notifier` is an optional TelegramNotifier-like object (.send())."""
         self.brokers = brokers
         self.state_file = state_file
         self.trades_csv = trades_csv
         self.daily_pnl_csv = daily_pnl_csv
+        self.notifier = notifier
         self.positions: dict[str, PositionState] = {}
         self.meta: dict = {}          # day-rollover bookkeeping etc.
         self._load_state()
+
+    def notify(self, text: str) -> None:
+        if self.notifier:
+            self.notifier.send(text)
 
     def broker_for(self, symbol: str) -> Broker:
         return self.brokers[symbol]
@@ -102,6 +108,9 @@ class Portfolio:
         log.info("OPENED %s %s qty=%s @ %.4f stop=%.4f (%s)",
                  direction.upper(), symbol, fill.qty, fill.price,
                  state.stop_price, strategy)
+        emoji = "📈" if direction == "long" else "📉"
+        self.notify(f"{emoji} {direction.upper()} {symbol}: {fill.qty:g} "
+                    f"@ {fill.price:.4f} (stop {state.stop_price:.4f}) — {strategy}")
         return state
 
     def close_position(self, symbol: str, reason: str) -> Optional[float]:
@@ -124,6 +133,9 @@ class Portfolio:
         self._save_state()
         log.info("CLOSED %s %s qty=%s @ %.4f pnl=%.2f (%s)",
                  state.direction.upper(), symbol, state.qty, fill.price, pnl, reason)
+        emoji = "✅" if pnl >= 0 else "🔻"
+        self.notify(f"{emoji} {symbol} {state.direction} gesloten @ {fill.price:.4f}: "
+                    f"{pnl:+.2f} ({reason})")
         return pnl
 
     # --- CSV logging -----------------------------------------------------------

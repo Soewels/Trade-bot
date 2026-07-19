@@ -36,6 +36,7 @@ from bot.risk_manager import RiskManager
 from bot.strategies import (MeanReversionStrategy, MomentumBreakoutStrategy,
                             TrendFollowingStrategy)
 from bot.strategies.base import Strategy
+from trade_bot.notify import TelegramNotifier
 
 log = logging.getLogger("alpaca_bot")
 
@@ -59,14 +60,16 @@ def build_strategies() -> list[Strategy]:
 
 
 class Bot:
-    def __init__(self, brokers):
+    def __init__(self, brokers, notifier=None):
         """`brokers` maps each tradable symbol to a broker instance."""
         self.brokers = brokers
+        self.notifier = notifier
         self.strategies = build_strategies()
         self.risk = RiskManager(config.RISK_PER_TRADE, config.MAX_NOTIONAL_FRACTION,
                                 risk_on_pair=config.RISK_ON_PAIR)
         self.portfolio = Portfolio(brokers, config.STATE_FILE,
-                                   config.TRADES_CSV, config.DAILY_PNL_CSV)
+                                   config.TRADES_CSV, config.DAILY_PNL_CSV,
+                                   notifier=notifier)
         # last evaluated candle bucket per (strategy, symbol)
         self.last_bucket: dict[tuple[str, str], int] = {}
         self._restore_us_stocks()
@@ -126,6 +129,9 @@ class Bot:
         for symbol in universe:
             if symbol not in current:
                 self._register_us_stock(symbol)
+        if universe != current:
+            self.portfolio.notify("🔎 US-aandelen bijgewerkt: "
+                                  + (", ".join(universe) or "geen"))
         meta["us_stocks"] = universe
         self.portfolio.save()
         log.info("US stock universe: %s", ", ".join(universe) or "empty")
@@ -265,10 +271,12 @@ class Bot:
             log.warning("could not read equity for daily P&L: %s", exc)
             return
         if meta.get("day"):
-            self.portfolio.log_daily_pnl(meta["day"],
-                                         float(meta["day_start_equity"]), equity)
-            log.info("daily P&L for %s: %.2f",
-                     meta["day"], equity - float(meta["day_start_equity"]))
+            start = float(meta["day_start_equity"])
+            self.portfolio.log_daily_pnl(meta["day"], start, equity)
+            log.info("daily P&L for %s: %.2f", meta["day"], equity - start)
+            emoji = "🟢" if equity >= start else "🔴"
+            self.portfolio.notify(f"{emoji} Dagresultaat {meta['day']}: "
+                                  f"{equity - start:+.2f} (vermogen {equity:.2f})")
         meta["day"] = today
         meta["day_start_equity"] = equity
         self.portfolio.save()
@@ -278,8 +286,12 @@ class Bot:
     def run(self) -> None:
         log.info("market profile: %s — instruments: %s",
                  config.BOT_MARKET, ", ".join(config.INSTRUMENTS))
-        log.info("total equity across brokers: %.2f", self.portfolio.total_equity())
+        equity = self.portfolio.total_equity()
+        log.info("total equity across brokers: %.2f", equity)
         self.portfolio.reconcile()
+        self.portfolio.notify(
+            f"🤖 Multi-bot gestart ({config.BOT_MARKET}): "
+            f"{', '.join(config.INSTRUMENTS)} — vermogen {equity:.2f}")
         backoff = config.POLL_SECONDS
         while True:
             try:
@@ -292,9 +304,14 @@ class Bot:
                 raise
             except (BrokerError, ConnectionError, OSError) as exc:
                 log.error("broker error, retrying in %ds: %s", backoff, exc)
+                if self.notifier:
+                    self.notifier.send_error(f"⚠️ Broker-fout, opnieuw proberen "
+                                             f"over {backoff}s: {exc}")
                 backoff = min(backoff * 2, 300)
-            except Exception:
+            except Exception as exc:
                 log.exception("unexpected error, retrying in %ds", backoff)
+                if self.notifier:
+                    self.notifier.send_error(f"⚠️ Onverwachte fout: {exc}")
                 backoff = min(backoff * 2, 300)
             time.sleep(backoff)
 
@@ -310,7 +327,10 @@ def main() -> None:
     brokers = build_brokers(config)
     for broker in set(brokers.values()):
         broker.connect()
-    bot = Bot(brokers)
+    notifier = TelegramNotifier.from_env()
+    if notifier:
+        log.info("Telegram notifications enabled")
+    bot = Bot(brokers, notifier=notifier)
     try:
         bot.run()
     except KeyboardInterrupt:

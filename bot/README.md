@@ -167,12 +167,17 @@ Stop with `Ctrl+C` — open positions remain open and are picked up again on
 restart via `alpaca_state.json` (entry price, stops and trailing state are
 persisted and reconciled against the brokers' real positions at startup).
 
-## Logs
+## Logs & notifications
 
 - `trades.csv` — one row per completed round-trip: timestamp, instrument,
   direction, entry price, exit price, P&L and position size.
 - `daily_pnl.csv` — one row per calendar day (Amsterdam time for EU, New
   York for US): start equity, end equity and P&L.
+- **Telegram** (optional): set `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`
+  in `.env` (same setup as the original crypto bot — via @BotFather) and
+  you get a phone notification for every entry/exit with its reason and
+  P&L, the daily result, changes to the screened US stock universe, and
+  errors (rate-limited to once per 15 minutes).
 
 ## Tests
 
