@@ -56,6 +56,8 @@ class TradeBot:
         self.paused = False
         self.last_price: float | None = None
         self.equity_history: deque[float] = deque(maxlen=288)  # ~24u bij 5min-polls
+        self.last_relearn_scores: dict[str, float] = {}
+        self.started_at = time.time()
         self._last_relearn = 0.0  # 0 → bij "auto" leert de bot meteen bij de eerste stap
         self._running = False
 
@@ -82,6 +84,16 @@ class TradeBot:
         if not self.live:
             return "PAPER"
         return "TESTNET" if self.exchange.testnet else "LIVE"
+
+    @property
+    def seconds_to_relearn(self) -> float | None:
+        """Seconden tot de volgende auto-evaluatie; None buiten auto-modus."""
+        if self.config.strategy != "auto":
+            return None
+        if self._last_relearn == 0:
+            return 0.0
+        elapsed = time.monotonic() - self._last_relearn
+        return max(self.config.relearn_hours * 3600 - elapsed, 0.0)
 
     def set_active_strategy(self, name: str) -> None:
         if name not in STRATEGY_NAMES:
@@ -130,6 +142,7 @@ class TradeBot:
                 logger.warning("relearn: %s overgeslagen: %s", name, exc)
         if not results:
             return
+        self.last_relearn_scores = results
         best = max(results, key=results.get)
         scores = ", ".join(f"{n}={r:+.2f}%" for n, r in sorted(results.items(),
                                                                key=lambda x: -x[1]))
@@ -147,7 +160,8 @@ class TradeBot:
         """Eén iteratie: data ophalen, signaal bepalen, eventueel handelen."""
         cfg = self.config
         self._maybe_relearn()
-        lookback = max(cfg.slow_period, cfg.rsi_period, cfg.macd_slow + cfg.macd_signal)
+        lookback = max(cfg.slow_period, cfg.rsi_period, cfg.macd_slow + cfg.macd_signal,
+                       cfg.bb_period, cfg.breakout_period)
         candles = self.market.fetch_candles(cfg.symbol, cfg.interval, limit=lookback + 50)
         closes = [c.close for c in candles]
         price = closes[-1]

@@ -91,6 +91,37 @@ def macd(prices: list[float], fast: int = 12, slow: int = 26, signal: int = 9,
     return macd_line, signal_line, histogram
 
 
+def bollinger(prices: list[float], period: int = 20, num_std: float = 2.0,
+              ) -> tuple[list[Optional[float]], list[Optional[float]], list[Optional[float]]]:
+    """Bollinger Bands: geeft (middenlijn/SMA, bovenband, onderband) terug."""
+    if period <= 1:
+        raise ValueError("period moet groter zijn dan 1")
+    middle = sma(prices, period)
+    upper: list[Optional[float]] = [None] * len(prices)
+    lower: list[Optional[float]] = [None] * len(prices)
+    for i in range(period - 1, len(prices)):
+        window = prices[i - period + 1: i + 1]
+        mean = middle[i]
+        std = (sum((p - mean) ** 2 for p in window) / period) ** 0.5
+        upper[i] = mean + num_std * std
+        lower[i] = mean - num_std * std
+    return middle, upper, lower
+
+
+def donchian(prices: list[float], period: int = 20,
+             ) -> tuple[list[Optional[float]], list[Optional[float]]]:
+    """Donchian-kanaal: (hoogste, laagste) van de VOORGAANDE period waarden."""
+    if period <= 0:
+        raise ValueError("period moet positief zijn")
+    highest: list[Optional[float]] = [None] * len(prices)
+    lowest: list[Optional[float]] = [None] * len(prices)
+    for i in range(period, len(prices)):
+        window = prices[i - period: i]
+        highest[i] = max(window)
+        lowest[i] = min(window)
+    return highest, lowest
+
+
 def _rsi_value(avg_gain: float, avg_loss: float) -> float:
     if avg_loss == 0:
         return 100.0

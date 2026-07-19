@@ -21,6 +21,9 @@ class BotConfig:
     macd_fast: int = 12              # snelle EMA (macd)
     macd_slow: int = 26              # trage EMA (macd)
     macd_signal: int = 9             # signaallijn-periode (macd)
+    bb_period: int = 20              # Bollinger Bands-periode
+    bb_std: float = 2.0              # aantal standaarddeviaties (bollinger)
+    breakout_period: int = 20        # uitbraakperiode (breakout)
 
     # Portfolio & risico
     start_cash: float = 10_000.0     # startkapitaal in quote-valuta (USDT)
@@ -46,7 +49,11 @@ class BotConfig:
             raise ValueError("max_order moet positief zijn")
         if self.macd_fast >= self.macd_slow:
             raise ValueError("macd_fast moet kleiner zijn dan macd_slow")
-        if self.strategy not in ("sma_cross", "rsi", "macd", "auto"):
+        if self.bb_period <= 1 or self.bb_std <= 0:
+            raise ValueError("vereist: bb_period > 1 en bb_std > 0")
+        if self.breakout_period <= 0:
+            raise ValueError("breakout_period moet positief zijn")
+        if self.strategy not in ("sma_cross", "rsi", "macd", "bollinger", "breakout", "auto"):
             raise ValueError(f"onbekende strategie: {self.strategy}")
         if self.relearn_hours <= 0:
             raise ValueError("relearn_hours moet positief zijn")

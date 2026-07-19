@@ -21,6 +21,7 @@ from trade_bot.exchange import BinanceExchange
 from trade_bot.kraken import KrakenExchange
 from trade_bot.market import get_market
 from trade_bot.notify import TelegramNotifier
+from trade_bot.strategy import STRATEGY_NAMES
 from trade_bot.webapp import Dashboard, local_ip
 
 
@@ -46,6 +47,9 @@ def build_config(args: argparse.Namespace) -> BotConfig:
         macd_fast=args.macd_fast,
         macd_slow=args.macd_slow,
         macd_signal=args.macd_signal,
+        bb_period=args.bb_period,
+        bb_std=args.bb_std,
+        breakout_period=args.breakout_period,
         start_cash=args.cash,
         position_size=args.size,
         fee_rate=args.fee,
@@ -66,7 +70,7 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
                         help="handelspaar (standaard BTCUSDT; Kraken: XBTUSD)")
     parser.add_argument("--interval", default="1h", help="candle-interval, bv. 15m, 1h, 4h, 1d")
     parser.add_argument("--strategy", default="sma_cross",
-                        choices=["sma_cross", "rsi", "macd", "auto"],
+                        choices=[*STRATEGY_NAMES, "auto"],
                         help="handelsstrategie; 'auto' kiest en leert zelf (alleen bij run)")
     parser.add_argument("--fast", type=int, default=10, help="snelle SMA-periode")
     parser.add_argument("--slow", type=int, default=30, help="trage SMA-periode")
@@ -76,6 +80,9 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--macd-fast", type=int, default=12)
     parser.add_argument("--macd-slow", type=int, default=26)
     parser.add_argument("--macd-signal", type=int, default=9)
+    parser.add_argument("--bb-period", type=int, default=20, help="Bollinger Bands-periode")
+    parser.add_argument("--bb-std", type=float, default=2.0, help="Bollinger standaarddeviaties")
+    parser.add_argument("--breakout-period", type=int, default=20, help="uitbraakperiode")
     parser.add_argument("--cash", type=float, default=10_000.0, help="startkapitaal (USDT)")
     parser.add_argument("--size", type=float, default=0.95, help="fractie van cash per aankoop")
     parser.add_argument("--fee", type=float, default=0.001, help="handelskosten per order (0.001 = 0.1%%)")
@@ -123,7 +130,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
               f"({args.interval}, {market.name})")
 
     rows = []
-    for name in ("sma_cross", "rsi", "macd"):
+    for name in STRATEGY_NAMES:
         args.strategy = name
         result = run_backtest(candles, build_config(args))
         win_rate = 100.0 * result.wins / max(result.wins + result.losses, 1)

@@ -37,8 +37,17 @@ PAGE = """<!doctype html>
   .card { background: #1e293b; border-radius: 12px; padding: 12px; }
   .card .label { font-size: .7rem; color: #94a3b8; text-transform: uppercase; letter-spacing: .05em; }
   .card .value { font-size: 1.25rem; font-weight: 700; margin-top: 2px; }
+  .card .value.small { font-size: 1rem; }
   .pos { color: #4ade80; } .neg { color: #f87171; }
   .wide { grid-column: 1 / -1; }
+  .rows div { display: flex; justify-content: space-between; padding: 5px 0;
+              border-bottom: 1px solid #334155; font-size: .85rem; }
+  .rows div:last-child { border-bottom: 0; }
+  .rows span { color: #94a3b8; }
+  .scores { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .scores .chip { font-size: .72rem; padding: 3px 8px; border-radius: 999px;
+                  background: #0f172a; border: 1px solid #334155; }
+  .scores .chip.active { border-color: #4ade80; }
   svg { width: 100%; height: 56px; margin-top: 6px; }
   .btns { display: flex; gap: 8px; margin-bottom: 14px; }
   button { flex: 1; padding: 12px; border: 0; border-radius: 10px; font-size: .9rem;
@@ -59,16 +68,40 @@ PAGE = """<!doctype html>
     <svg id="spark" viewBox="0 0 300 56" preserveAspectRatio="none"></svg></div>
   <div class="card"><div class="label">Rendement</div><div class="value" id="ret">…</div></div>
   <div class="card"><div class="label">Laatste prijs</div><div class="value" id="price">…</div></div>
-  <div class="card"><div class="label">Cash</div><div class="value" id="cash">…</div></div>
+  <div class="card"><div class="label">Vrije cash</div><div class="value" id="cash">…</div></div>
   <div class="card"><div class="label">Positie</div><div class="value" id="posqty">…</div></div>
+</div>
+<div class="card wide" id="poscard" style="display:none; margin-bottom:14px">
+  <div class="label">Open positie</div>
+  <div class="rows">
+    <div><span>Instapprijs</span><b id="p-entry">…</b></div>
+    <div><span>Winst/verlies</span><b id="p-pnl">…</b></div>
+    <div><span>Waarde</span><b id="p-value">…</b></div>
+    <div><span>Stop-loss bij</span><b id="p-stop">…</b></div>
+    <div><span>Take-profit bij</span><b id="p-take">…</b></div>
+  </div>
 </div>
 <div class="btns">
   <button id="toggle" onclick="toggleRun()">…</button>
   <button id="panic" onclick="panic()">🚨 Noodstop</button>
 </div>
+<div class="grid">
+  <div class="card"><div class="label">Winrate</div><div class="value" id="s-winrate">…</div></div>
+  <div class="card"><div class="label">Winst / verlies</div><div class="value" id="s-wl">…</div></div>
+  <div class="card"><div class="label">Beste / slechtste</div><div class="value small" id="s-best">…</div></div>
+  <div class="card"><div class="label">Betaalde kosten</div><div class="value small" id="s-fees">…</div></div>
+</div>
+<div class="card wide" id="braincard" style="margin-bottom:14px">
+  <div class="label">🧠 Strategie</div>
+  <div class="rows">
+    <div><span>Actief</span><b id="b-active">…</b></div>
+    <div id="b-next-row"><span>Volgende evaluatie</span><b id="b-next">…</b></div>
+  </div>
+  <div class="scores" id="b-scores"></div>
+</div>
 <div class="card wide">
   <div class="label">Laatste trades</div>
-  <table><thead><tr><th>Tijd</th><th>Kant</th><th>Prijs</th><th>Reden</th></tr></thead>
+  <table><thead><tr><th>Tijd</th><th>Kant</th><th>Prijs</th><th>Resultaat</th><th>Reden</th></tr></thead>
   <tbody id="trades"></tbody></table>
 </div>
 <div class="muted" id="meta"></div>
@@ -106,11 +139,51 @@ async function refresh() {
     document.getElementById("cash").textContent = fmt(s.cash);
     document.getElementById("posqty").textContent = s.position ? s.position.toFixed(6) : "geen";
     document.getElementById("toggle").textContent = s.paused ? "▶️ Hervat" : "⏸ Pauzeer";
+
+    // open positie
+    const pc = document.getElementById("poscard");
+    if (s.position_info) {
+      pc.style.display = "";
+      const pi = s.position_info;
+      document.getElementById("p-entry").textContent = fmt(pi.entry);
+      const pnl = document.getElementById("p-pnl");
+      pnl.textContent = (pi.pnl_pct >= 0 ? "+" : "") + fmt(pi.pnl_pct) + "%";
+      pnl.className = pi.pnl_pct >= 0 ? "pos" : "neg";
+      document.getElementById("p-value").textContent = pi.value ? fmt(pi.value) + " " + s.quote : "—";
+      document.getElementById("p-stop").textContent = pi.stop ? fmt(pi.stop) + " (-" + s.risk.stop_loss_pct + "%)" : "uit";
+      document.getElementById("p-take").textContent = pi.take ? fmt(pi.take) + " (+" + s.risk.take_profit_pct + "%)" : "uit";
+    } else { pc.style.display = "none"; }
+
+    // statistieken
+    document.getElementById("s-winrate").textContent =
+      (s.stats.wins + s.stats.losses) ? s.stats.winrate + "%" : "—";
+    document.getElementById("s-wl").textContent = s.stats.wins + " / " + s.stats.losses;
+    document.getElementById("s-best").textContent = s.stats.best_pct !== null
+      ? `+${fmt(s.stats.best_pct)}% / ${fmt(s.stats.worst_pct)}%` : "—";
+    document.getElementById("s-fees").textContent = fmt(s.stats.fees) + " " + s.quote;
+
+    // strategie-blok
+    document.getElementById("b-active").textContent =
+      s.strategy + (s.auto ? " (automatisch gekozen)" : " (vast ingesteld)");
+    document.getElementById("b-next-row").style.display = s.auto ? "" : "none";
+    if (s.next_relearn_min !== null) {
+      const m = s.next_relearn_min;
+      document.getElementById("b-next").textContent =
+        m >= 60 ? `over ${Math.floor(m/60)}u ${m%60}m` : `over ${m}m`;
+    }
+    document.getElementById("b-scores").innerHTML =
+      Object.entries(s.relearn_scores).sort((a,b) => b[1]-a[1]).map(([n,v]) =>
+        `<span class="chip ${n===s.strategy?'active':''}">${n} ${v>=0?'+':''}${fmt(v)}%</span>`
+      ).join("");
+
     document.getElementById("meta").textContent =
-      s.symbol + " · " + s.interval + " · " + s.strategy + " · " + s.num_trades + " trades";
+      s.symbol + " · " + s.interval + " · " + s.num_trades + " trades · " + s.uptime_h + "u actief";
     document.getElementById("trades").innerHTML = s.trades.map(t =>
       `<tr><td>${t.time}</td><td class="${t.side==='BUY'?'pos':'neg'}">${t.side}</td>` +
-      `<td>${fmt(t.price)}</td><td>${t.reason}</td></tr>`).join("");
+      `<td>${fmt(t.price)}</td>` +
+      `<td class="${t.pnl_pct===null?'':(t.pnl_pct>=0?'pos':'neg')}">` +
+      `${t.pnl_pct===null?'—':(t.pnl_pct>=0?'+':'')+fmt(t.pnl_pct)+'%'}</td>` +
+      `<td>${t.reason}</td></tr>`).join("");
     drawSpark(s.history);
   } catch (e) { /* bot even onbereikbaar; volgende poging */ }
 }
@@ -186,24 +259,74 @@ class Dashboard:
     def status(self) -> dict:
         bot = self.bot
         p = bot.portfolio
+        cfg = bot.config
         price = bot.last_price or 0.0
         equity = p.equity(price) if price else p.cash
-        start = bot.config.start_cash
-        trades = [{
-            "time": t.timestamp.strftime("%d-%m %H:%M"),
-            "side": t.side, "price": round(t.price, 2), "reason": t.reason,
-        } for t in reversed(p.trades[-15:])]
+        start = cfg.start_cash
+
+        # Statistieken uit de trade-historie: koppel elke SELL aan de BUY ervoor
+        trades = []
+        wins = losses = 0
+        fees = 0.0
+        pnls: list[float] = []
+        last_buy_price = 0.0
+        for t in p.trades:
+            fees += t.fee
+            pnl = None
+            if t.side == "BUY":
+                last_buy_price = t.price
+            elif last_buy_price > 0:
+                pnl = (t.price - last_buy_price) / last_buy_price * 100
+                pnls.append(pnl)
+                wins += pnl > 0
+                losses += pnl <= 0
+            trades.append({
+                "time": t.timestamp.strftime("%d-%m %H:%M"),
+                "side": t.side, "price": round(t.price, 2), "reason": t.reason,
+                "pnl_pct": round(pnl, 2) if pnl is not None else None,
+            })
+        trades = trades[-15:][::-1]
+
+        # Details van de open positie
+        position_info = None
+        if p.in_position and p.entry_price > 0:
+            position_info = {
+                "entry": round(p.entry_price, 2),
+                "pnl_pct": round((price - p.entry_price) / p.entry_price * 100, 2)
+                           if price else 0.0,
+                "stop": round(p.entry_price * (1 - cfg.stop_loss), 2)
+                        if cfg.stop_loss > 0 else None,
+                "take": round(p.entry_price * (1 + cfg.take_profit), 2)
+                        if cfg.take_profit > 0 else None,
+                "value": round(p.position * price, 2) if price else None,
+            }
+
+        relearn_s = bot.seconds_to_relearn
         return {
             "mode": bot.mode, "paused": bot.paused,
-            "symbol": bot.config.symbol, "interval": bot.config.interval,
-            "strategy": bot.active_strategy
-                        + (" (auto)" if bot.config.strategy == "auto" else ""),
+            "symbol": cfg.symbol, "interval": cfg.interval,
+            "strategy": bot.active_strategy,
+            "auto": cfg.strategy == "auto",
             "quote": bot.quote,
             "equity": round(equity, 2), "cash": round(p.cash, 2),
             "position": p.position, "last_price": price or None,
             "return_pct": round((equity - start) / start * 100, 2),
             "num_trades": len(p.trades), "trades": trades,
             "history": [round(v, 2) for v in bot.equity_history],
+            "position_info": position_info,
+            "stats": {
+                "wins": wins, "losses": losses,
+                "winrate": round(100.0 * wins / max(wins + losses, 1), 1),
+                "fees": round(fees, 2),
+                "best_pct": round(max(pnls), 2) if pnls else None,
+                "worst_pct": round(min(pnls), 2) if pnls else None,
+            },
+            "relearn_scores": {k: round(v, 2)
+                               for k, v in bot.last_relearn_scores.items()},
+            "next_relearn_min": round(relearn_s / 60) if relearn_s is not None else None,
+            "uptime_h": round((__import__("time").time() - bot.started_at) / 3600, 1),
+            "risk": {"stop_loss_pct": cfg.stop_loss * 100,
+                     "take_profit_pct": cfg.take_profit * 100},
         }
 
     def handle_action(self, action: str) -> dict:
