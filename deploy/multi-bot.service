@@ -1,0 +1,34 @@
+# systemd-service voor de multi-instrument bot (bot/, EU-profiel).
+# Draait prima naast de bestaande trade-bot service op dezelfde server.
+# Installatie: sudo bash deploy/multibot-install.sh
+#
+# Handige commando's daarna:
+#   sudo systemctl status multi-bot     # draait hij?
+#   sudo journalctl -u multi-bot -f     # live meekijken met de logs
+#   sudo systemctl restart multi-bot    # herstarten
+#   sudo systemctl stop multi-bot       # stoppen
+
+[Unit]
+Description=Multi-instrument trade bot (IBKR + Kraken)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tradebot
+WorkingDirectory=/opt/multi-bot
+EnvironmentFile=/etc/multi-bot.env
+ExecStart=/opt/multi-bot/venv/bin/python -m bot.main
+# Bij het opstarten kan IB Gateway nog aan het inloggen zijn; de bot faalt
+# dan op de verbinding en systemd probeert het hier vanzelf opnieuw.
+Restart=always
+RestartSec=15
+
+# Beperk wat het proces mag, voor het geval er iets misgaat
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/multi-bot
+
+[Install]
+WantedBy=multi-user.target

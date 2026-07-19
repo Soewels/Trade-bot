@@ -127,6 +127,32 @@ Set `BOT_MARKET=us`, fill in the Alpaca keys in `.env`
 (paper API keys from [app.alpaca.markets](https://app.alpaca.markets)), and
 `pip install alpaca-trade-api`. Everything else is identical.
 
+## Running 24/7 on a server (VPS)
+
+On the same Ubuntu/Debian server that runs the original crypto bot (or a
+fresh one):
+
+```bash
+cd Trade-bot   # the cloned repo
+sudo bash deploy/multibot-install.sh
+sudo nano /etc/multi-bot.env                              # IBKR login (paper!), Kraken keys
+cd /opt/multi-bot/ib-gateway && sudo docker compose up -d # headless IB Gateway
+sudo systemctl start multi-bot
+sudo journalctl -u multi-bot -f                           # watch the logs
+```
+
+This installs the bot as the `multi-bot` systemd service (next to, and
+independent of, the existing `trade-bot` service) and runs **IB Gateway
+headless in Docker** via [gnzsnz/ib-gateway-docker](https://github.com/gnzsnz/ib-gateway-docker),
+which logs in automatically and survives IBKR's forced daily restart. Both
+come back automatically after a reboot; the bot restores its positions from
+the state files. The gateway's API port is bound to localhost only — never
+expose it to the internet.
+
+Note for **live** (not paper) IBKR accounts: two-factor authentication via
+the IB Key app means you must confirm the gateway's session roughly weekly;
+fully unattended operation is only possible in paper mode.
+
 ## How it runs
 
 - every 30 seconds the loop checks hard/trailing stops against the latest price;
