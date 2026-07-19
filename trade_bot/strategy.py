@@ -3,10 +3,10 @@
 from enum import Enum
 
 from .config import BotConfig
-from .indicators import macd, rsi, sma
+from .indicators import bollinger, donchian, macd, rsi, sma
 
 
-STRATEGY_NAMES = ("sma_cross", "rsi", "macd")
+STRATEGY_NAMES = ("sma_cross", "rsi", "macd", "bollinger", "breakout")
 
 
 class Signal(str, Enum):
@@ -96,6 +96,52 @@ class MacdStrategy(Strategy):
         return Signal.HOLD
 
 
+class BollingerStrategy(Strategy):
+    """Mean-reversion: koop wanneer de koers vanuit de onderband weer omhoog
+    kruist, verkoop wanneer hij vanuit de bovenband weer omlaag kruist."""
+
+    def __init__(self, period: int = 20, num_std: float = 2.0):
+        if period <= 1 or num_std <= 0:
+            raise ValueError("vereist: period > 1 en num_std > 0")
+        self.period = period
+        self.num_std = num_std
+
+    def signal(self, closes: list[float]) -> Signal:
+        if len(closes) < self.period + 1:
+            return Signal.HOLD
+        _, upper, lower = bollinger(closes, self.period, self.num_std)
+        prev_close, cur_close = closes[-2], closes[-1]
+        if None in (upper[-2], lower[-2], upper[-1], lower[-1]):
+            return Signal.HOLD
+        if prev_close <= lower[-2] and cur_close > lower[-1]:
+            return Signal.BUY
+        if prev_close >= upper[-2] and cur_close < upper[-1]:
+            return Signal.SELL
+        return Signal.HOLD
+
+
+class BreakoutStrategy(Strategy):
+    """Trendvolgend: koop bij een uitbraak boven het hoogste punt van de
+    afgelopen period candles, verkoop bij een val onder het laagste punt."""
+
+    def __init__(self, period: int = 20):
+        if period <= 0:
+            raise ValueError("period moet positief zijn")
+        self.period = period
+
+    def signal(self, closes: list[float]) -> Signal:
+        if len(closes) < self.period + 1:
+            return Signal.HOLD
+        highest, lowest = donchian(closes, self.period)
+        if highest[-1] is None or lowest[-1] is None:
+            return Signal.HOLD
+        if closes[-1] > highest[-1]:
+            return Signal.BUY
+        if closes[-1] < lowest[-1]:
+            return Signal.SELL
+        return Signal.HOLD
+
+
 def build_strategy(config: BotConfig) -> Strategy:
     if config.strategy == "sma_cross":
         return SmaCrossStrategy(config.fast_period, config.slow_period)
@@ -103,4 +149,8 @@ def build_strategy(config: BotConfig) -> Strategy:
         return RsiStrategy(config.rsi_period, config.rsi_oversold, config.rsi_overbought)
     if config.strategy == "macd":
         return MacdStrategy(config.macd_fast, config.macd_slow, config.macd_signal)
+    if config.strategy == "bollinger":
+        return BollingerStrategy(config.bb_period, config.bb_std)
+    if config.strategy == "breakout":
+        return BreakoutStrategy(config.breakout_period)
     raise ValueError(f"onbekende strategie: {config.strategy}")

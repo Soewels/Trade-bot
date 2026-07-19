@@ -16,9 +16,11 @@ from trade_bot.market import Market, get_market
 from trade_bot.notify import TelegramNotifier
 from trade_bot.state import load_state, save_state
 from trade_bot.webapp import Dashboard
-from trade_bot.indicators import ema, macd, rsi, sma
+from trade_bot.indicators import bollinger, donchian, ema, macd, rsi, sma
 from trade_bot.portfolio import Portfolio
-from trade_bot.strategy import MacdStrategy, RsiStrategy, Signal, SmaCrossStrategy
+from trade_bot.strategy import (STRATEGY_NAMES, BollingerStrategy, BreakoutStrategy,
+                                MacdStrategy, RsiStrategy, Signal, SmaCrossStrategy,
+                                build_strategy)
 
 
 def patch_market(bot, candles):
@@ -66,6 +68,27 @@ class TestIndicators(unittest.TestCase):
         with self.assertRaises(ValueError):
             macd([1.0] * 50, 26, 12, 9)
 
+    def test_bollinger_flat_series_has_zero_width(self):
+        middle, upper, lower = bollinger([100.0] * 30, 20, 2.0)
+        self.assertIsNone(upper[18])
+        self.assertAlmostEqual(upper[-1], 100.0)
+        self.assertAlmostEqual(lower[-1], 100.0)
+        self.assertAlmostEqual(middle[-1], 100.0)
+
+    def test_bollinger_bands_surround_middle(self):
+        prices = [100 + 5 * math.sin(i / 3) for i in range(60)]
+        middle, upper, lower = bollinger(prices, 20, 2.0)
+        for m, u, l in zip(middle, upper, lower):
+            if m is not None:
+                self.assertGreater(u, m)
+                self.assertLess(l, m)
+
+    def test_donchian_uses_previous_window_only(self):
+        highest, lowest = donchian([1.0, 2.0, 3.0, 4.0, 5.0], 3)
+        self.assertIsNone(highest[2])
+        self.assertEqual(highest[3], 3.0)  # max van [1,2,3], exclusief candle 4 zelf
+        self.assertEqual(lowest[4], 2.0)
+
     def test_rsi_bounds(self):
         prices = [100 + 5 * math.sin(i / 3) for i in range(60)]
         for v in rsi(prices, 14):
@@ -107,6 +130,26 @@ class TestStrategies(unittest.TestCase):
     def test_macd_strategy_holds_without_data(self):
         self.assertIs(MacdStrategy().signal([1.0] * 10), Signal.HOLD)
 
+    def test_bollinger_strategy_buys_on_band_recovery(self):
+        # stabiel, dan een scherpe dip onder de band, dan herstel → koop
+        closes = [100.0 + 0.1 * (i % 3) for i in range(30)] + [90.0, 88.0, 96.0]
+        strategy = BollingerStrategy(20, 2.0)
+        signals = [strategy.signal(closes[: i + 1]) for i in range(len(closes))]
+        self.assertIn(Signal.BUY, signals)
+
+    def test_breakout_strategy_buys_on_new_high(self):
+        closes = [100.0 + (i % 5) * 0.1 for i in range(25)] + [110.0]
+        strategy = BreakoutStrategy(20)
+        self.assertIs(strategy.signal(closes), Signal.BUY)
+        closes_down = [100.0 + (i % 5) * 0.1 for i in range(25)] + [90.0]
+        self.assertIs(strategy.signal(closes_down), Signal.SELL)
+
+    def test_all_strategies_buildable(self):
+        from dataclasses import replace
+        base = BotConfig()
+        for name in STRATEGY_NAMES:
+            self.assertIsNotNone(build_strategy(replace(base, strategy=name)))
+
     def test_invalid_periods_rejected(self):
         with self.assertRaises(ValueError):
             SmaCrossStrategy(20, 10)
@@ -114,6 +157,10 @@ class TestStrategies(unittest.TestCase):
             RsiStrategy(14, 70, 30)
         with self.assertRaises(ValueError):
             MacdStrategy(26, 12, 9)
+        with self.assertRaises(ValueError):
+            BollingerStrategy(1, 2.0)
+        with self.assertRaises(ValueError):
+            BreakoutStrategy(0)
 
 
 class TestPortfolio(unittest.TestCase):
@@ -457,6 +504,31 @@ class TestDashboard(unittest.TestCase):
         self.assertEqual(status["cash"], 500.0)
         self.assertEqual(status["quote"], "USDT")
         self.assertEqual(status["trades"], [])
+
+    def test_status_includes_detailed_stats(self):
+        dashboard = self._dashboard()
+        bot = dashboard.bot
+        bot.last_price = 110.0
+        bot.last_relearn_scores = {"rsi": 1.5, "macd": -0.5}
+        # één winnende roundtrip + een nieuwe open positie
+        bot.portfolio.record_buy(price=100.0, quantity=1.0, quote_spent=100.0, fee=0.1)
+        bot.portfolio.record_sell(price=105.0, quantity=1.0, quote_received=105.0, fee=0.1)
+        bot.portfolio.record_buy(price=108.0, quantity=1.0, quote_spent=108.0, fee=0.1)
+        status = dashboard.status()
+
+        self.assertEqual(status["stats"]["wins"], 1)
+        self.assertEqual(status["stats"]["losses"], 0)
+        self.assertAlmostEqual(status["stats"]["fees"], 0.3)
+        self.assertAlmostEqual(status["stats"]["best_pct"], 5.0)
+        self.assertEqual(status["relearn_scores"], {"rsi": 1.5, "macd": -0.5})
+        info = status["position_info"]
+        self.assertEqual(info["entry"], 108.0)
+        self.assertAlmostEqual(info["pnl_pct"], round((110 - 108) / 108 * 100, 2))
+        self.assertAlmostEqual(info["stop"], round(108 * 0.95, 2))
+        self.assertAlmostEqual(info["take"], round(108 * 1.15, 2))
+        # pnl per trade in de tabel: verkoop toont +5%, koop toont None
+        sells = [t for t in status["trades"] if t["side"] == "SELL"]
+        self.assertAlmostEqual(sells[0]["pnl_pct"], 5.0)
 
     def test_pause_resume_and_unknown_action(self):
         dashboard = self._dashboard()

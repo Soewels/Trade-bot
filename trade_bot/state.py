@@ -26,6 +26,7 @@ def save_state(bot, path: str) -> None:
         "symbol": bot.config.symbol,
         "mode": bot.mode,
         "active_strategy": bot.active_strategy,
+        "relearn_scores": bot.last_relearn_scores,
         "cash": p.cash,
         "position": p.position,
         "entry_price": p.entry_price,
@@ -74,6 +75,9 @@ def load_state(bot, path: str) -> bool:
 
     if bot.config.strategy == "auto" and data.get("active_strategy"):
         bot.set_active_strategy(data["active_strategy"])
+    if isinstance(data.get("relearn_scores"), dict):
+        bot.last_relearn_scores = {str(k): float(v)
+                                   for k, v in data["relearn_scores"].items()}
 
     logger.info("toestand hersteld uit %s: positie=%.8f, instap=%.2f, %d trades "
                 "(opgeslagen %s)", path, p.position, p.entry_price,
