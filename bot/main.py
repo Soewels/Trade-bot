@@ -95,8 +95,31 @@ class Bot:
         self.close_all_requested = False
         self.status: dict = {"ts": 0, "equity": None, "positions": [],
                              "universe": [], "paused": False,
-                             "market": config.BOT_MARKET}
+                             "market": config.BOT_MARKET, "note": ""}
         self._restore_us_stocks()
+
+    def connect_brokers(self, delay: float = 15.0) -> None:
+        """Verbind alle brokers; blijf het proberen tot het lukt.
+
+        Zo kan de bot (en het dashboard) alvast draaien terwijl de IB
+        Gateway nog niet ingelogd is — hij pikt de verbinding vanzelf op."""
+        pending = set(self.brokers.values())
+        while pending:
+            for broker in sorted(pending, key=lambda b: b.name):
+                try:
+                    broker.connect()
+                    pending.discard(broker)
+                    log.info("verbonden met %s", broker.name)
+                except Exception as exc:
+                    log.warning("verbinding met %s lukt nog niet (%s); "
+                                "nieuwe poging over %.0fs", broker.name, exc, delay)
+            if pending:
+                names = ", ".join(sorted(b.name for b in pending))
+                self.status = {**self.status, "ts": time.time(),
+                               "note": f"wacht op verbinding met {names}…"}
+                time.sleep(delay)
+                delay = min(delay * 2, 120)
+        self.status = {**self.status, "note": ""}
 
     # --- US stock screener --------------------------------------------------------
 
@@ -325,7 +348,8 @@ class Bot:
         self.status = {"ts": time.time(), "equity": equity,
                        "positions": positions,
                        "universe": self.portfolio.meta.get("us_stocks", []),
-                       "paused": self.paused, "market": config.BOT_MARKET}
+                       "paused": self.paused, "market": config.BOT_MARKET,
+                       "note": ""}
 
     # --- daily P&L --------------------------------------------------------------
 
@@ -355,6 +379,7 @@ class Bot:
     def run(self) -> None:
         log.info("market profile: %s — instruments: %s",
                  config.BOT_MARKET, ", ".join(config.INSTRUMENTS))
+        self.connect_brokers()
         equity = self.portfolio.total_equity()
         log.info("total equity across brokers: %.2f", equity)
         self.portfolio.reconcile()
@@ -396,8 +421,6 @@ def main() -> None:
         sys.exit("BOT_MARKET=us requires ALPACA_API_KEY and ALPACA_API_SECRET "
                  "in .env (see .env.example)")
     brokers = build_brokers(config)
-    for broker in set(brokers.values()):
-        broker.connect()
     notifier = TelegramNotifier.from_env()
     if notifier:
         notifier = PrefixedNotifier(notifier, config.TELEGRAM_PREFIX)

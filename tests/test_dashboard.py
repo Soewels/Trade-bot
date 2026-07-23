@@ -68,6 +68,25 @@ def make_bot(broker):
             setattr(config, key, value)
 
 
+class ConnectRetryTests(unittest.TestCase):
+    def test_connect_keeps_retrying_until_success(self):
+        class FlakyBroker(StubBroker):
+            def __init__(self):
+                super().__init__()
+                self.attempts = 0
+
+            def connect(self):
+                self.attempts += 1
+                if self.attempts < 3:
+                    raise ConnectionRefusedError("gateway nog niet ingelogd")
+
+        broker = FlakyBroker()
+        bot = make_bot(broker)
+        bot.connect_brokers(delay=0.01)
+        self.assertEqual(broker.attempts, 3)
+        self.assertEqual(bot.status["note"], "")
+
+
 class BotControlTests(unittest.TestCase):
     def test_pause_blocks_new_evaluations(self):
         bot = make_bot(StubBroker())
