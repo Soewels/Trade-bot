@@ -65,7 +65,8 @@ async function refresh(){
   document.getElementById("equity").textContent = "€ " + fmt(s.equity);
   document.getElementById("paused").textContent = s.paused ? "⏸ gepauzeerd" : "";
   document.getElementById("meta").textContent =
-    s.market + " · bijgewerkt " + new Date(s.ts*1000).toLocaleTimeString("nl-BE");
+    s.market + " · " + (s.note ? s.note + " · " : "") +
+    "bijgewerkt " + new Date(s.ts*1000).toLocaleTimeString("nl-BE");
   let rows = "<tr><th>Instrument</th><th>Kant</th><th>Instap</th><th>Stop</th><th>Resultaat</th></tr>";
   if(!s.positions.length) rows += "<tr><td colspan=5 class=muted>geen</td></tr>";
   for(const p of s.positions){
