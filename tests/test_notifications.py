@@ -39,6 +39,33 @@ def make_portfolio(notifier):
                      os.path.join(tmp, "daily.csv"), notifier=notifier)
 
 
+class PrefixedNotifierTests(unittest.TestCase):
+    def test_prefix_is_added_to_all_messages(self):
+        from bot.main import PrefixedNotifier
+
+        class Inner:
+            def __init__(self):
+                self.sent, self.errors = [], []
+
+            def send(self, text):
+                self.sent.append(text)
+                return True
+
+            def send_error(self, text):
+                self.errors.append(text)
+                return True
+
+        inner = Inner()
+        notifier = PrefixedNotifier(inner, "[Multi-bot]")
+        notifier.send("gekocht")
+        notifier.send_error("storing")
+        self.assertEqual(inner.sent, ["[Multi-bot] gekocht"])
+        self.assertEqual(inner.errors, ["[Multi-bot] storing"])
+        # empty prefix leaves messages untouched
+        PrefixedNotifier(inner, "").send("kaal")
+        self.assertEqual(inner.sent[-1], "kaal")
+
+
 class NotificationTests(unittest.TestCase):
     def test_open_and_close_send_messages(self):
         notifier = StubNotifier()

@@ -41,6 +41,24 @@ from trade_bot.notify import TelegramNotifier
 log = logging.getLogger("alpaca_bot")
 
 
+class PrefixedNotifier:
+    """Zet een label voor elke melding, zodat deze bot en de oude crypto-bot
+    dezelfde Telegram-chat kunnen delen zonder verwarring."""
+
+    def __init__(self, inner, prefix: str):
+        self.inner = inner
+        self.prefix = prefix
+
+    def _tag(self, text: str) -> str:
+        return f"{self.prefix} {text}" if self.prefix else text
+
+    def send(self, text: str) -> bool:
+        return self.inner.send(self._tag(text))
+
+    def send_error(self, text: str) -> bool:
+        return self.inner.send_error(self._tag(text))
+
+
 def build_strategies() -> list[Strategy]:
     mr = config.MEAN_REVERSION
     mb = config.MOMENTUM_BREAKOUT
@@ -329,7 +347,9 @@ def main() -> None:
         broker.connect()
     notifier = TelegramNotifier.from_env()
     if notifier:
-        log.info("Telegram notifications enabled")
+        notifier = PrefixedNotifier(notifier, config.TELEGRAM_PREFIX)
+        log.info("Telegram notifications enabled (prefix: %s)",
+                 config.TELEGRAM_PREFIX or "none")
     bot = Bot(brokers, notifier=notifier)
     try:
         bot.run()

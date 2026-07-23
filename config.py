@@ -70,6 +70,11 @@ US_STOCK_MIN_MARKET_CAP_MUSD = 10_000.0   # >= $10 billion market cap
 US_STOCK_MIN_DOLLAR_VOLUME = 50e6   # >= $50M average daily dollar volume
 US_STOCK_RESCAN_DAYS = 7            # refresh the universe weekly
 
+# --- Telegram ----------------------------------------------------------------------
+# Prefix voor alle meldingen van deze bot, zodat je ze in dezelfde chat kunt
+# onderscheiden van de oude crypto-bot. Leeg ("") = geen prefix.
+TELEGRAM_PREFIX = os.environ.get("TELEGRAM_PREFIX", "[Multi-bot]")
+
 # --- risk management ---------------------------------------------------------------
 ATR_PERIOD = 14
 RISK_PER_TRADE = 0.01          # a 1 ATR adverse move == 1% of account equity
