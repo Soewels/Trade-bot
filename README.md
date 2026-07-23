@@ -4,6 +4,13 @@ Een crypto trading bot in Python met **backtesting**, **paper trading** (gesimul
 en optioneel **echt handelen** via **Binance** of **Kraken**. Standaard draait alles in
 paper-modus: geen API-key nodig, geen echt geld.
 
+> 🆕 **Nieuw**: er is nu ook een aparte **multi-instrument bot** in [`bot/`](bot/)
+> die vijf instrumenten tegelijk handelt met drie strategieën en ATR-gebaseerd
+> risicobeheer. Standaard draait hij op **Europese beurzen in euro's** (UCITS-ETF's
+> op Xetra via Interactive Brokers + BTC/EUR via Kraken); met `BOT_MARKET=us` op
+> de Amerikaanse markt via Alpaca — zie [`bot/README.md`](bot/README.md).
+> Starten: `python -m bot.main` (instellingen in `.env`, zie `.env.example`).
+
 ## Functies
 
 - 📈 **Vijf strategieën**: SMA-crossover en Breakout (trendvolgend), RSI en

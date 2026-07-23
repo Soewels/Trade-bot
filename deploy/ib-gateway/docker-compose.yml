@@ -1,0 +1,23 @@
+# Headless IB Gateway voor de multi-bot, met automatische login en
+# automatische afhandeling van de dagelijkse IBKR-herstart (via IBC).
+# Image-documentatie: https://github.com/gnzsnz/ib-gateway-docker
+#
+# Inloggegevens (TWS_USERID/TWS_PASSWORD/TRADING_MODE) komen uit
+# /etc/multi-bot.env — hetzelfde bestand als de bot zelf gebruikt.
+#
+# Starten:   cd /opt/multi-bot/ib-gateway && docker compose up -d
+# Logs:      docker compose logs -f
+# De container start automatisch mee na een reboot (restart-policy).
+
+services:
+  ib-gateway:
+    image: ghcr.io/gnzsnz/ib-gateway:stable
+    restart: unless-stopped
+    env_file: /etc/multi-bot.env
+    environment:
+      READ_ONLY_API: "no"
+    ports:
+      # ALLEEN op localhost — de API-poort mag nooit open op internet staan.
+      # host 4002 -> paper-API in de container, host 4001 -> live-API.
+      - "127.0.0.1:4001:4003"
+      - "127.0.0.1:4002:4004"
