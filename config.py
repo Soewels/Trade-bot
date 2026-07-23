@@ -155,6 +155,16 @@ TREND_FOLLOWING = {
     "trail_atr_mult": 3.0,
 }
 
+# --- dashboard ---------------------------------------------------------------------------
+# Mobiel dashboard (meekijken + pauze/noodstop). Standaard alleen op localhost:
+# op een server kijk je mee via een SSH-tunnel of Tailscale. Zet WEB_HOST=0.0.0.0
+# alleen als je het risico begrijpt; de knoppen zijn met een code beveiligd,
+# meekijken niet. WEB_DASHBOARD=0 zet het dashboard uit.
+WEB_ENABLED = os.environ.get("WEB_DASHBOARD", "1") == "1"
+WEB_HOST = os.environ.get("WEB_HOST", "127.0.0.1")
+WEB_PORT = int(os.environ.get("WEB_PORT", "8081"))   # oude bot gebruikt 8080
+WEB_CODE = os.environ.get("WEB_CODE", "")            # leeg = random code in de log
+
 # --- runtime -----------------------------------------------------------------------------
 POLL_SECONDS = 30              # main loop wake-up interval (stop checks)
 BAR_FETCH_LIMIT = 500          # history fetched per evaluation (>= 201 for EMA200)
