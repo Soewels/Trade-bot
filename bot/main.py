@@ -90,6 +90,12 @@ class Bot:
                                    notifier=notifier)
         # last evaluated candle bucket per (strategy, symbol)
         self.last_bucket: dict[tuple[str, str], int] = {}
+        # dashboard-besturing
+        self.paused = False
+        self.close_all_requested = False
+        self.status: dict = {"ts": 0, "equity": None, "positions": [],
+                             "universe": [], "paused": False,
+                             "market": config.BOT_MARKET}
         self._restore_us_stocks()
 
     # --- US stock screener --------------------------------------------------------
@@ -176,6 +182,7 @@ class Bot:
             price = broker.latest_price(symbol)
             if price is None:
                 continue
+            state.extra["last_price"] = price  # voor het dashboard
             self.risk.update_trailing_stop(state, price)
             changed = True
             if self.risk.stop_hit(state, price):
@@ -186,6 +193,8 @@ class Bot:
             self.portfolio.save()
 
     def evaluate_strategies(self) -> None:
+        if self.paused:
+            return  # gepauzeerd via dashboard: stops blijven wel actief
         now = time.time()
         for strategy in self.strategies:
             bucket_seconds = strategy.timeframe_minutes * 60
@@ -276,6 +285,48 @@ class Bot:
                 fill, atr, signal.action),
             trail_atr_mult=strategy.trail_atr_mult)
 
+    # --- dashboard-besturing ------------------------------------------------------
+
+    def process_close_all(self) -> None:
+        """Noodstop vanaf het dashboard: verkoop alles waarvan de markt open is."""
+        if not self.close_all_requested:
+            return
+        self.close_all_requested = False
+        self.portfolio.notify("🛑 Noodstop via dashboard: alle posities worden gesloten")
+        for symbol in list(self.portfolio.positions):
+            if self.brokers[symbol].market_open(symbol):
+                self.portfolio.close_position(symbol, "noodstop via dashboard")
+            else:
+                log.warning("noodstop: markt voor %s is dicht, positie blijft "
+                            "open tot de beurs opent", symbol)
+                self.portfolio.notify(f"⚠️ Noodstop: markt voor {symbol} is dicht; "
+                                      "sluit zodra de beurs opent")
+
+    def update_status(self) -> None:
+        """Statussnapshot voor het dashboard (elke loop ververst)."""
+        positions = []
+        for symbol, state in self.portfolio.positions.items():
+            price = state.extra.get("last_price")
+            upnl = None
+            if price:
+                if state.direction == "long":
+                    upnl = (price - state.entry_price) * state.qty
+                else:
+                    upnl = (state.entry_price - price) * state.qty
+            positions.append({"symbol": symbol, "direction": state.direction,
+                              "qty": state.qty, "entry": state.entry_price,
+                              "stop": state.stop_price, "upnl": upnl,
+                              "strategy": state.strategy})
+        try:
+            equity = self.portfolio.total_equity()
+        except Exception as exc:
+            log.debug("geen equity voor status: %s", exc)
+            equity = self.status.get("equity")
+        self.status = {"ts": time.time(), "equity": equity,
+                       "positions": positions,
+                       "universe": self.portfolio.meta.get("us_stocks", []),
+                       "paused": self.paused, "market": config.BOT_MARKET}
+
     # --- daily P&L --------------------------------------------------------------
 
     def roll_daily_pnl(self) -> None:
@@ -313,10 +364,12 @@ class Bot:
         backoff = config.POLL_SECONDS
         while True:
             try:
+                self.process_close_all()
                 self.maybe_screen_us_stocks()
                 self.roll_daily_pnl()
                 self.check_stops()
                 self.evaluate_strategies()
+                self.update_status()
                 backoff = config.POLL_SECONDS
             except KeyboardInterrupt:
                 raise
@@ -351,6 +404,18 @@ def main() -> None:
         log.info("Telegram notifications enabled (prefix: %s)",
                  config.TELEGRAM_PREFIX or "none")
     bot = Bot(brokers, notifier=notifier)
+    if config.WEB_ENABLED:
+        import secrets
+
+        from bot.webapp import Dashboard
+        code = config.WEB_CODE or secrets.token_hex(3)
+        port = Dashboard(bot, config.TRADES_CSV, config.WEB_HOST,
+                         config.WEB_PORT, code).start()
+        log.info("📱 Dashboard: http://%s:%d — toegangscode voor de knoppen: %s",
+                 config.WEB_HOST, port, code)
+        if config.WEB_HOST == "127.0.0.1":
+            log.info("   (op afstand meekijken: ssh -L %d:localhost:%d root@<server>,"
+                     " daarna http://localhost:%d openen)", port, port, port)
     try:
         bot.run()
     except KeyboardInterrupt:

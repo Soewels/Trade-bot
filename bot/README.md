@@ -167,6 +167,21 @@ Stop with `Ctrl+C` — open positions remain open and are picked up again on
 restart via `alpaca_state.json` (entry price, stops and trailing state are
 persisted and reconciled against the brokers' real positions at startup).
 
+## Mobile dashboard
+
+The bot serves a phone-friendly dashboard (default port **8081**; the
+original crypto bot uses 8080). It shows live equity, open positions with
+entry/stop/unrealized P&L, the screened US stock universe and recent
+trades, and has a **pause** button (no new entries; stops stay active) and
+an **emergency stop** (sell everything; markets that are closed follow at
+the open). The buttons require the access code (`WEB_CODE` in `.env`, or a
+random code printed in the logs); viewing does not.
+
+By default it binds to `127.0.0.1` only. On a VPS, view it through an SSH
+tunnel (`ssh -L 8081:localhost:8081 root@<server>` → open
+`http://localhost:8081`) or via Tailscale. `WEB_DASHBOARD=0` disables it;
+`WEB_HOST`/`WEB_PORT` change the binding.
+
 ## Logs & notifications
 
 - `trades.csv` — one row per completed round-trip: timestamp, instrument,
