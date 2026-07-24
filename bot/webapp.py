@@ -87,6 +87,13 @@ PAGE = """<!doctype html>
 <script>
 const fmt = (v, d=2) => (v===null||v===undefined) ? "–" :
   Number(v).toLocaleString("nl-BE",{minimumFractionDigits:d,maximumFractionDigits:d});
+// prijzen: meer decimalen voor goedkope munten (0,2953 i.p.v. 0,30)
+const fmtP = (v) => {
+  if(v===null||v===undefined) return "–";
+  const a = Math.abs(Number(v));
+  const d = a < 0.01 ? 6 : a < 1 ? 4 : a < 10 ? 3 : 2;
+  return Number(v).toLocaleString("nl-BE",{minimumFractionDigits:2,maximumFractionDigits:d});
+};
 const cls = (v) => (Number(v) >= 0 ? "pos" : "neg");
 const chips = (arr, c="") => arr.length
   ? arr.map(x=>`<span class="badge ${c}">${x}</span>`).join("")
@@ -142,8 +149,8 @@ async function refresh(){
     const pct = (p.last_price && p.entry)
       ? ((p.direction==="long"?1:-1)*(p.last_price/p.entry-1)*100) : null;
     rows += `<tr><td>${p.symbol}<div class=muted>${p.strategy||""}</div></td>`+
-      `<td>${p.direction}</td><td>${fmt(p.entry)}</td><td>${fmt(p.last_price)}</td>`+
-      `<td>${fmt(p.stop)}</td><td class="${cls(p.upnl??0)}">${fmt(p.upnl)}`+
+      `<td>${p.direction}</td><td>${fmtP(p.entry)}</td><td>${fmtP(p.last_price)}</td>`+
+      `<td>${fmtP(p.stop)}</td><td class="${cls(p.upnl??0)}">${fmt(p.upnl)}`+
       `${pct===null?"":` <span class=muted>(${pct>=0?"+":""}${fmt(pct,1)}%)</span>`}</td></tr>`;
   }
   document.getElementById("positions").innerHTML = rows;
