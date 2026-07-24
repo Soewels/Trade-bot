@@ -94,7 +94,9 @@ class Bot:
         self.paused = False
         self.close_all_requested = False
         self.status: dict = {"ts": 0, "equity": None, "positions": [],
-                             "universe": [], "paused": False,
+                             "universe": [], "crypto_universe": [],
+                             "brokers": [], "equity_history": [],
+                             "paused": False,
                              "market": config.BOT_MARKET, "note": ""}
         # brokerverbindingen: handel met wat wél verbonden is, blijf de rest
         # proberen (zo draait crypto al terwijl de IB Gateway nog ontbreekt)
@@ -453,6 +455,8 @@ class Bot:
             positions.append({"symbol": symbol, "direction": state.direction,
                               "qty": state.qty, "entry": state.entry_price,
                               "stop": state.stop_price, "upnl": upnl,
+                              "last_price": price,
+                              "entry_time": state.entry_time,
                               "strategy": state.strategy})
         try:
             equity = self.total_equity() if self.connected_brokers else None
@@ -463,9 +467,22 @@ class Bot:
         if self.pending_brokers:
             names = ", ".join(sorted(b.name for b in self.pending_brokers))
             note = f"wacht op verbinding met {names}…"
+        # vermogensverloop voor het dashboard-grafiekje: 1 punt per minuut,
+        # maximaal ~2 dagen (in geheugen; gaat verloren bij een herstart)
+        history = list(self.status.get("equity_history", []))
+        if equity is not None and (not history
+                                   or time.time() - history[-1][0] >= 60):
+            history = (history + [[round(time.time()), round(equity, 2)]])[-2880:]
+        brokers = [{"name": b.name, "connected": b in self.connected_brokers}
+                   for b in sorted(set(self.brokers.values()),
+                                   key=lambda b: b.name)]
         self.status = {"ts": time.time(), "equity": equity,
                        "positions": positions,
                        "universe": self.portfolio.meta.get("us_stocks", []),
+                       "crypto_universe": self.portfolio.meta.get(
+                           "crypto_universe", self._crypto_symbols()),
+                       "brokers": brokers,
+                       "equity_history": history,
                        "paused": self.paused, "market": config.BOT_MARKET,
                        "note": note}
 
@@ -556,7 +573,8 @@ def main() -> None:
         from bot.webapp import Dashboard
         code = config.WEB_CODE or secrets.token_hex(3)
         port = Dashboard(bot, config.TRADES_CSV, config.WEB_HOST,
-                         config.WEB_PORT, code).start()
+                         config.WEB_PORT, code,
+                         daily_pnl_csv=config.DAILY_PNL_CSV).start()
         log.info("📱 Dashboard: http://%s:%d — toegangscode voor de knoppen: %s",
                  config.WEB_HOST, port, code)
         if config.WEB_HOST == "127.0.0.1":

@@ -1,9 +1,12 @@
 """Mobiel dashboard voor de multi-bot.
 
-Toont live: totale waarde, open posities (met instap, stop en tussentijds
-resultaat), de zelf-gescreende US-aandelen, de laatste trades en het
-dagresultaat. Knoppen: pauze (geen nieuwe posities) en noodstop (alles
-verkopen) — beide beveiligd met een toegangscode; meekijken kan zonder.
+Toont live: totale waarde met verloopgrafiekje, open posities (instap,
+actuele koers, stop en tussentijds resultaat in EUR en %), resultaten-
+statistieken (totaal gerealiseerd, winrate, beste/slechtste trade), de
+laatste dagresultaten, de gekozen crypto-munten en US-aandelen, de
+verbindingsstatus per broker en de laatste trades. Knoppen: pauze (geen
+nieuwe posities) en noodstop (alles verkopen) — beveiligd met een
+toegangscode; meekijken kan zonder.
 
 Standaard luistert de server alleen op localhost (WEB_HOST=127.0.0.1):
 op een VPS kijk je mee via een SSH-tunnel
@@ -26,11 +29,11 @@ PAGE = """<!doctype html>
 <title>Multi-bot</title>
 <style>
  body{font-family:-apple-system,system-ui,sans-serif;background:#111;color:#eee;
-      margin:0;padding:12px;max-width:640px;margin-inline:auto}
+      margin:0;padding:12px;max-width:680px;margin-inline:auto}
  h1{font-size:1.2rem;margin:8px 0} .muted{color:#999;font-size:.85rem}
  .card{background:#1c1c1e;border-radius:12px;padding:12px;margin:10px 0}
- .big{font-size:1.6rem;font-weight:700} .pos{color:#4cd964} .neg{color:#ff453a}
- table{width:100%;border-collapse:collapse;font-size:.9rem}
+ .big{font-size:1.7rem;font-weight:700} .pos{color:#4cd964} .neg{color:#ff453a}
+ table{width:100%;border-collapse:collapse;font-size:.88rem}
  td,th{padding:4px 6px;text-align:left;border-bottom:1px solid #2c2c2e}
  th{color:#999;font-weight:500}
  button{border:0;border-radius:10px;padding:12px 16px;font-size:1rem;color:#fff;
@@ -40,50 +43,115 @@ PAGE = """<!doctype html>
        font-size:1rem;width:130px}
  .badge{display:inline-block;background:#2c2c2e;border-radius:6px;
         padding:2px 8px;margin:2px;font-size:.85rem}
+ .badge.ok{border:1px solid #4cd96455} .badge.wait{border:1px solid #b5890055;color:#caa64b}
+ .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
+ .tile{background:#2c2c2e;border-radius:10px;padding:8px 10px}
+ .tile .v{font-size:1.05rem;font-weight:700} .tile .k{color:#999;font-size:.75rem}
 </style></head><body>
 <h1>🤖 Multi-bot <span id="paused" class="muted"></span></h1>
+
 <div class="card"><div class="muted">Totale waarde</div>
  <div class="big" id="equity">…</div>
- <div class="muted" id="meta"></div></div>
+ <div id="spark"></div>
+ <div class="muted" id="meta"></div>
+ <div id="brokers"></div></div>
+
 <div class="card"><div class="muted">Open posities</div>
  <table id="positions"></table></div>
-<div class="card"><div class="muted">Zelf-gescreende US-aandelen</div>
- <div id="universe"></div></div>
+
+<div class="card"><div class="muted">Resultaten (afgeronde trades)</div>
+ <div class="grid" id="stats"></div></div>
+
+<div class="card"><div class="muted">Dagresultaten</div>
+ <table id="daily"></table></div>
+
+<div class="card"><div class="muted">Crypto-selectie (zelf gekozen stijgers)</div>
+ <div id="crypto"></div>
+ <div class="muted" style="margin-top:8px">US-aandelen (zelf gescreend)</div>
+ <div id="stocks"></div></div>
+
 <div class="card"><div class="muted">Laatste trades</div>
  <table id="trades"></table></div>
+
 <div class="card"><div class="muted">Knoppen (toegangscode nodig)</div>
  <input id="code" placeholder="code" inputmode="text">
  <br><button id="pause" onclick="act('pause')">⏸ Pauze aan/uit</button>
  <button id="stop" onclick="act('close_all')">🛑 Noodstop</button>
  <div class="muted" id="msg"></div></div>
+
 <script>
-const fmt = (v) => (v===null||v===undefined) ? "–" :
-  Number(v).toLocaleString("nl-BE",{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmt = (v, d=2) => (v===null||v===undefined) ? "–" :
+  Number(v).toLocaleString("nl-BE",{minimumFractionDigits:d,maximumFractionDigits:d});
+const cls = (v) => (Number(v) >= 0 ? "pos" : "neg");
+const chips = (arr, c="") => arr.length
+  ? arr.map(x=>`<span class="badge ${c}">${x}</span>`).join("")
+  : "<span class=muted>geen</span>";
+
+function spark(points){
+ if(!points || points.length < 2) return "";
+ const w=600, h=70;
+ const ts=points.map(p=>p[0]), vs=points.map(p=>p[1]);
+ const t0=Math.min(...ts), dt=(Math.max(...ts)-t0)||1;
+ const v0=Math.min(...vs), dv=(Math.max(...vs)-v0)||1;
+ const pts=points.map(p=>((p[0]-t0)/dt*w).toFixed(1)+","+
+                         (h-5-(p[1]-v0)/dv*(h-10)).toFixed(1)).join(" ");
+ const up = vs[vs.length-1] >= vs[0];
+ return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"
+   style="width:100%;height:70px;margin-top:6px"><polyline fill="none"
+   stroke="${up ? "#4cd964" : "#ff453a"}" stroke-width="2" points="${pts}"/></svg>`;
+}
+
 async function refresh(){
  try{
   const s = await (await fetch("api/state")).json();
   document.getElementById("equity").textContent = "€ " + fmt(s.equity);
+  document.getElementById("spark").innerHTML = spark(s.equity_history);
   document.getElementById("paused").textContent = s.paused ? "⏸ gepauzeerd" : "";
   document.getElementById("meta").textContent =
     s.market + " · " + (s.note ? s.note + " · " : "") +
     "bijgewerkt " + new Date(s.ts*1000).toLocaleTimeString("nl-BE");
-  let rows = "<tr><th>Instrument</th><th>Kant</th><th>Instap</th><th>Stop</th><th>Resultaat</th></tr>";
-  if(!s.positions.length) rows += "<tr><td colspan=5 class=muted>geen</td></tr>";
+  document.getElementById("brokers").innerHTML = (s.brokers||[]).map(b =>
+    `<span class="badge ${b.connected?"ok":"wait"}">`+
+    `${b.connected?"✅":"⏳"} ${b.name}</span>`).join("");
+
+  let rows = "<tr><th>Instrument</th><th>Kant</th><th>Instap</th><th>Nu</th>"+
+             "<th>Stop</th><th>Resultaat</th></tr>";
+  if(!s.positions.length) rows += "<tr><td colspan=6 class=muted>geen</td></tr>";
   for(const p of s.positions){
-    const cls = (p.upnl??0) >= 0 ? "pos" : "neg";
-    rows += `<tr><td>${p.symbol}</td><td>${p.direction}</td><td>${fmt(p.entry)}</td>`+
-            `<td>${fmt(p.stop)}</td><td class=${cls}>${p.upnl===null?"–":fmt(p.upnl)}</td></tr>`;
+    const pct = (p.last_price && p.entry)
+      ? ((p.direction==="long"?1:-1)*(p.last_price/p.entry-1)*100) : null;
+    rows += `<tr><td>${p.symbol}<div class=muted>${p.strategy||""}</div></td>`+
+      `<td>${p.direction}</td><td>${fmt(p.entry)}</td><td>${fmt(p.last_price)}</td>`+
+      `<td>${fmt(p.stop)}</td><td class="${cls(p.upnl??0)}">${fmt(p.upnl)}`+
+      `${pct===null?"":` <span class=muted>(${pct>=0?"+":""}${fmt(pct,1)}%)</span>`}</td></tr>`;
   }
   document.getElementById("positions").innerHTML = rows;
-  document.getElementById("universe").innerHTML =
-    s.universe.length ? s.universe.map(x=>`<span class=badge>${x}</span>`).join("")
-                      : "<span class=muted>nog geen scan gedaan</span>";
+
+  const st = s.stats || {};
+  document.getElementById("stats").innerHTML = [
+    ["Totaal", (st.total===undefined?"–":fmt(st.total)), cls(st.total??0)],
+    ["Trades", st.count ?? 0, ""],
+    ["Winrate", st.count ? fmt(st.winrate*100,0)+"%" : "–", ""],
+    ["Beste", st.count ? fmt(st.best) : "–", "pos"],
+    ["Slechtste", st.count ? fmt(st.worst) : "–", "neg"],
+  ].map(([k,v,c])=>`<div class=tile><div class="v ${c}">${v}</div>`+
+                   `<div class=k>${k}</div></div>`).join("");
+
+  let d = "<tr><th>Datum</th><th>Resultaat</th><th>Vermogen</th></tr>";
+  if(!(s.daily||[]).length) d += "<tr><td colspan=3 class=muted>nog geen volledige dag</td></tr>";
+  for(const r of (s.daily||[]))
+    d += `<tr><td>${r.date}</td><td class="${cls(r.pnl)}">${fmt(r.pnl)}</td>`+
+         `<td>${fmt(r.end_equity)}</td></tr>`;
+  document.getElementById("daily").innerHTML = d;
+
+  document.getElementById("crypto").innerHTML = chips(s.crypto_universe||[]);
+  document.getElementById("stocks").innerHTML = chips(s.universe||[]);
+
   let t = "<tr><th>Tijd</th><th>Instrument</th><th>Kant</th><th>Resultaat</th></tr>";
   if(!s.trades.length) t += "<tr><td colspan=4 class=muted>nog geen</td></tr>";
   for(const r of s.trades){
-    const cls = Number(r.pnl) >= 0 ? "pos" : "neg";
     t += `<tr><td>${r.timestamp.slice(5,16).replace("T"," ")}</td><td>${r.instrument}</td>`+
-         `<td>${r.direction}</td><td class=${cls}>${fmt(r.pnl)}</td></tr>`;
+         `<td>${r.direction}</td><td class="${cls(r.pnl)}">${fmt(r.pnl)}</td></tr>`;
   }
   document.getElementById("trades").innerHTML = t;
  }catch(e){ document.getElementById("msg").textContent = "verbinding weg… " + e; }
@@ -101,9 +169,10 @@ refresh(); setInterval(refresh, 10000);
 
 class Dashboard:
     def __init__(self, bot, trades_csv: str, host: str, port: int,
-                 access_code: str):
+                 access_code: str, daily_pnl_csv: str | None = None):
         self.bot = bot
         self.trades_csv = trades_csv
+        self.daily_pnl_csv = daily_pnl_csv
         self.host = host
         self.port = port
         self.access_code = access_code
@@ -113,18 +182,36 @@ class Dashboard:
 
     def state(self) -> dict:
         snapshot = dict(self.bot.status)
-        snapshot["trades"] = self._recent_trades()
+        trades = self._read_csv(self.trades_csv)
+        snapshot["trades"] = list(reversed(trades[-15:]))
+        snapshot["stats"] = self._stats(trades)
+        daily = self._read_csv(self.daily_pnl_csv) if self.daily_pnl_csv else []
+        snapshot["daily"] = list(reversed(daily[-7:]))
         return snapshot
 
-    def _recent_trades(self, limit: int = 15) -> list[dict]:
-        if not os.path.exists(self.trades_csv):
+    @staticmethod
+    def _stats(trades: list[dict]) -> dict:
+        pnls = []
+        for row in trades:
+            try:
+                pnls.append(float(row["pnl"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+        if not pnls:
+            return {"count": 0}
+        wins = sum(1 for p in pnls if p > 0)
+        return {"count": len(pnls), "total": round(sum(pnls), 2),
+                "winrate": round(wins / len(pnls), 4),
+                "best": max(pnls), "worst": min(pnls)}
+
+    def _read_csv(self, path: str) -> list[dict]:
+        if not path or not os.path.exists(path):
             return []
         try:
-            with open(self.trades_csv) as handle:
-                rows = list(csv.DictReader(handle))
-            return list(reversed(rows[-limit:]))
+            with open(path) as handle:
+                return list(csv.DictReader(handle))
         except OSError as exc:
-            log.warning("trades.csv onleesbaar: %s", exc)
+            log.warning("%s onleesbaar: %s", path, exc)
             return []
 
     # --- acties -----------------------------------------------------------------
