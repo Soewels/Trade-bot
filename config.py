@@ -85,6 +85,12 @@ MAX_NOTIONAL_FRACTION = 0.95   # never spend more than this fraction of buying p
 CRYPTO_BUDGET = float(os.environ.get("CRYPTO_BUDGET", "0"))
 STOCKS_BUDGET = float(os.environ.get("STOCKS_BUDGET", "0"))
 
+# Maximum per lósse positie (EUR, 0 = geen aparte limiet). Zonder deze limiet
+# kan een rustig instrument (kleine ATR) in z'n eentje het hele potje vullen;
+# hiermee garandeer je spreiding over meerdere munten/aandelen tegelijk.
+CRYPTO_MAX_PER_POSITION = float(os.environ.get("CRYPTO_MAX_PER_POSITION", "0"))
+STOCKS_MAX_PER_POSITION = float(os.environ.get("STOCKS_MAX_PER_POSITION", "0"))
+
 # --- crypto-instrumenten (eu-profiel, via Kraken) -----------------------------------
 # Komma-gescheiden lijst van munten die de breakout-strategie handelt, bv.:
 #   CRYPTO_SYMBOLS=BTC/EUR,ETH/EUR,DOGE/EUR,PEPE/EUR

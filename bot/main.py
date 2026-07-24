@@ -405,6 +405,8 @@ class Bot:
             log.error("could not read account for %s entry: %s", symbol, exc)
             return
         budget = config.CRYPTO_BUDGET if is_crypto else config.STOCKS_BUDGET
+        per_position = (config.CRYPTO_MAX_PER_POSITION if is_crypto
+                        else config.STOCKS_MAX_PER_POSITION)
         max_notional = None
         if budget > 0:
             remaining = budget - self.sleeve_exposure(is_crypto)
@@ -414,6 +416,9 @@ class Bot:
                          budget, symbol)
                 return
             max_notional = remaining
+        if per_position > 0:
+            max_notional = (per_position if max_notional is None
+                            else min(max_notional, per_position))
         qty = self.risk.position_size(equity, bars[-1].close * fx, atr * fx,
                                       buying_power,
                                       fractional=broker.allows_fractional(symbol),

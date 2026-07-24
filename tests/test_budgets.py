@@ -29,7 +29,9 @@ class MaxNotionalTests(unittest.TestCase):
 
 class SleeveBudgetTests(unittest.TestCase):
     def setUp(self):
-        self._orig = (config.CRYPTO_BUDGET, config.STOCKS_BUDGET)
+        self._orig = (config.CRYPTO_BUDGET, config.STOCKS_BUDGET,
+                      config.CRYPTO_MAX_PER_POSITION,
+                      config.STOCKS_MAX_PER_POSITION)
         self.broker = KrakenStub()
         self.bot = make_bot(self.broker)
         self.bot._register_crypto("ETH/EUR")
@@ -40,7 +42,9 @@ class SleeveBudgetTests(unittest.TestCase):
             stop_price_fn=lambda fill: fill - 2.0)
 
     def tearDown(self):
-        config.CRYPTO_BUDGET, config.STOCKS_BUDGET = self._orig
+        (config.CRYPTO_BUDGET, config.STOCKS_BUDGET,
+         config.CRYPTO_MAX_PER_POSITION,
+         config.STOCKS_MAX_PER_POSITION) = self._orig
 
     def test_sleeve_exposure_counts_only_crypto(self):
         self.assertAlmostEqual(self.bot.sleeve_exposure(crypto=True), 10.0)
@@ -65,6 +69,25 @@ class SleeveBudgetTests(unittest.TestCase):
                          Signal("long", "test"), bars_with_atr())
         state = self.bot.portfolio.positions["ETH/EUR"]
         self.assertGreater(state.qty, 0.05)
+
+    def test_per_position_cap_guarantees_spreading(self):
+        # ruim budget, maar max 20 EUR per positie -> 0.2 stuks @ 100
+        config.CRYPTO_BUDGET = 1000.0
+        config.CRYPTO_MAX_PER_POSITION = 20.0
+        self.bot.execute(self.bot._momentum(), "ETH/EUR",
+                         Signal("long", "test"), bars_with_atr())
+        self.assertAlmostEqual(self.bot.portfolio.positions["ETH/EUR"].qty, 0.2)
+        # en er blijft dus ruimte over voor een tweede munt
+        self.bot.execute(self.bot._momentum(), "SOL/EUR",
+                         Signal("long", "test"), bars_with_atr())
+        self.assertAlmostEqual(self.bot.portfolio.positions["SOL/EUR"].qty, 0.2)
+
+    def test_per_position_cap_works_without_budget(self):
+        config.CRYPTO_BUDGET = 0.0
+        config.CRYPTO_MAX_PER_POSITION = 30.0
+        self.bot.execute(self.bot._momentum(), "ETH/EUR",
+                         Signal("long", "test"), bars_with_atr())
+        self.assertAlmostEqual(self.bot.portfolio.positions["ETH/EUR"].qty, 0.3)
 
 
 if __name__ == "__main__":
