@@ -117,6 +117,23 @@ def parse_crypto_symbols(raw: str) -> list[str]:
 
 CRYPTO_SYMBOLS = parse_crypto_symbols(os.environ.get("CRYPTO_SYMBOLS", "BTC/EUR"))
 
+
+def parse_crypto_timeframe(raw: str) -> int:
+    """Candle-grootte (minuten) voor de crypto-handel én -scanner.
+
+    Kleiner = alerter op snelle bewegingen (meme coins), maar ook meer
+    valse uitbraken en meer trades. De scanner meet zijn momentum in
+    24/48 candles van deze maat: bij 60 is dat 24/48 uur, bij 15 zo'n
+    6/12 uur."""
+    minutes = int(raw)
+    if minutes not in (5, 15, 30, 60, 240):
+        raise ValueError("CRYPTO_TIMEFRAME_MINUTES moet 5, 15, 30, 60 of 240 zijn")
+    return minutes
+
+
+CRYPTO_TIMEFRAME_MINUTES = parse_crypto_timeframe(
+    os.environ.get("CRYPTO_TIMEFRAME_MINUTES", "60"))
+
 # Zelfzoekende crypto-selectie: de bot scant alle Kraken-EUR-munten en kiest
 # de sterkste stijgers zelf. 0 = uit (dan geldt de vaste CRYPTO_SYMBOLS-lijst;
 # die lijst blijft in auto-modus het startpunt tot de eerste scan klaar is).
@@ -188,7 +205,7 @@ MOMENTUM_BREAKOUT = {
     "symbols": MARKET["momentum_symbols"],
     "period": 20,               # breakout high/low lookback
     "volume_mult": 1.5,         # volume must be >= 1.5x the 20-period average
-    "timeframe_minutes": 60,
+    "timeframe_minutes": CRYPTO_TIMEFRAME_MINUTES,
     "trail_atr_mult": 2.0,      # trailing stop distance in ATRs
 }
 

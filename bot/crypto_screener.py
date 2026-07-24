@@ -85,17 +85,21 @@ def rank_by_eur_volume(pairs: dict[str, dict], tickers: dict,
 
 
 def scan_kraken(count: int, min_eur_volume: float, top_by_volume: int = 15,
-                pause_s: float = 1.0) -> list[str]:
-    """Beste `count` stijgers onder de liquide Kraken-EUR-munten."""
+                pause_s: float = 1.0, interval: str = "1h") -> list[str]:
+    """Beste `count` stijgers onder de liquide Kraken-EUR-munten.
+
+    `interval` is de candle-grootte van de handel; het momentum wordt in
+    24/48 van die candles gemeten, zodat scanner en strategie dezelfde
+    tijdshorizon delen."""
     pairs = eur_pairs()
     tickers = kraken._public("/0/public/Ticker")
     candidates = rank_by_eur_volume(pairs, tickers, min_eur_volume)
-    log.info("crypto-scan: %d EUR-paren, %d liquide genoeg (>= EUR %.0fM/dag)",
+    log.info("crypto-scan: %d EUR-paren, %d liquide genoeg (>= EUR %.1fM/dag)",
              len(pairs), len(candidates), min_eur_volume / 1e6)
     scored: list[tuple[float, str]] = []
     for eur_volume, symbol, pair in candidates[:top_by_volume]:
         try:
-            candles = kraken.fetch_candles(pair, "1h", limit=80)
+            candles = kraken.fetch_candles(pair, interval, limit=80)
         except Exception as exc:
             log.warning("geen candles voor %s: %s", symbol, exc)
             continue

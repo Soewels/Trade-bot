@@ -32,6 +32,19 @@ class MomentumScoreTests(unittest.TestCase):
         self.assertIsNone(momentum_score(candles([100.0] * 10)))
 
 
+class TimeframeConfigTests(unittest.TestCase):
+    def test_valid_and_invalid_timeframes(self):
+        self.assertEqual(config.parse_crypto_timeframe("15"), 15)
+        self.assertEqual(config.parse_crypto_timeframe("60"), 60)
+        with self.assertRaises(ValueError):
+            config.parse_crypto_timeframe("45")
+
+    def test_all_timeframes_have_a_kraken_interval(self):
+        from bot.brokers.kraken_broker import INTERVAL_BY_MINUTES
+        for minutes in (5, 15, 30, 60, 240):
+            self.assertIn(minutes, INTERVAL_BY_MINUTES)
+
+
 class VolumeRankTests(unittest.TestCase):
     def test_filters_and_sorts(self):
         pairs = {
@@ -79,7 +92,7 @@ class CryptoScreeningIntegrationTests(unittest.TestCase):
                                     stop_price_fn=lambda fill: fill - 2.0)
         import bot.main as main_module
         main_module.crypto_screener.scan_kraken = (
-            lambda count, min_vol: ["SOL/EUR", "PEPE/EUR", "ETH/EUR"])
+            lambda count, min_vol, interval="1h": ["SOL/EUR", "PEPE/EUR", "ETH/EUR"])
         bot.maybe_screen_crypto()
         universe = bot.portfolio.meta["crypto_universe"]
         self.assertIn("BTC/EUR", universe)          # positie -> blijft
@@ -89,7 +102,7 @@ class CryptoScreeningIntegrationTests(unittest.TestCase):
         self.assertEqual(broker.pairs["SOL/EUR"], "SOLEUR")
         # zelfde 12 uur: scanner wordt niet opnieuw aangeroepen
         main_module.crypto_screener.scan_kraken = (
-            lambda count, min_vol: (_ for _ in ()).throw(AssertionError))
+            lambda count, min_vol, interval="1h": (_ for _ in ()).throw(AssertionError))
         bot.maybe_screen_crypto()
 
     def test_universe_restored_after_restart(self):
@@ -97,7 +110,7 @@ class CryptoScreeningIntegrationTests(unittest.TestCase):
         bot = make_bot(broker)
         import bot.main as main_module
         main_module.crypto_screener.scan_kraken = (
-            lambda count, min_vol: ["SOL/EUR", "DOGE/EUR"])
+            lambda count, min_vol, interval="1h": ["SOL/EUR", "DOGE/EUR"])
         bot.maybe_screen_crypto()
 
         from bot.main import Bot

@@ -193,9 +193,11 @@ class Bot:
             return
         meta["crypto_screened_ts"] = time.time()  # ook bij falen: geen retry-storm
         self.portfolio.save()
+        from bot.brokers.kraken_broker import INTERVAL_BY_MINUTES
         try:
-            picks = crypto_screener.scan_kraken(config.CRYPTO_AUTO_COUNT,
-                                                config.CRYPTO_MIN_EUR_VOLUME)
+            picks = crypto_screener.scan_kraken(
+                config.CRYPTO_AUTO_COUNT, config.CRYPTO_MIN_EUR_VOLUME,
+                interval=INTERVAL_BY_MINUTES[config.CRYPTO_TIMEFRAME_MINUTES])
         except Exception as exc:
             log.warning("crypto-scan mislukt (nieuwe poging over %.0f uur): %s",
                         config.CRYPTO_RESCAN_HOURS, exc)
