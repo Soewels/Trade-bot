@@ -112,6 +112,13 @@ def parse_crypto_symbols(raw: str) -> list[str]:
 
 CRYPTO_SYMBOLS = parse_crypto_symbols(os.environ.get("CRYPTO_SYMBOLS", "BTC/EUR"))
 
+# Zelfzoekende crypto-selectie: de bot scant alle Kraken-EUR-munten en kiest
+# de sterkste stijgers zelf. 0 = uit (dan geldt de vaste CRYPTO_SYMBOLS-lijst;
+# die lijst blijft in auto-modus het startpunt tot de eerste scan klaar is).
+CRYPTO_AUTO_COUNT = int(os.environ.get("CRYPTO_AUTO_COUNT", "5"))
+CRYPTO_MIN_EUR_VOLUME = float(os.environ.get("CRYPTO_MIN_EUR_VOLUME", "2000000"))
+CRYPTO_RESCAN_HOURS = float(os.environ.get("CRYPTO_RESCAN_HOURS", "12"))
+
 # --- market profiles ------------------------------------------------------------------
 # Instrument notes for "eu" (all EUR, Xetra = IBKR exchange code IBIS):
 #   SXR8 = iShares Core S&P 500 UCITS ETF (SPY equivalent)
