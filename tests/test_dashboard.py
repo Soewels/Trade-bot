@@ -62,7 +62,11 @@ def make_bot(broker):
     try:
         from bot.main import Bot
         brokers = {sym: broker for sym in config.INSTRUMENTS}
-        return Bot(brokers)
+        bot = Bot(brokers)
+        # in tests gelden alle brokers als verbonden
+        bot.connected_brokers = set(brokers.values())
+        bot.pending_brokers = set()
+        return bot
     finally:
         for key, value in originals.items():
             setattr(config, key, value)
@@ -82,9 +86,25 @@ class ConnectRetryTests(unittest.TestCase):
 
         broker = FlakyBroker()
         bot = make_bot(broker)
-        bot.connect_brokers(delay=0.01)
-        self.assertEqual(broker.attempts, 3)
+        bot.pending_brokers = {broker}
+        bot.connected_brokers = set()
+        bot._connect_delay = 0.0
+        for _ in range(5):
+            bot.try_connect_brokers()
+        self.assertEqual(broker.attempts, 3)  # 2x mislukt, 3e keer gelukt
+        self.assertIn(broker, bot.connected_brokers)
+        self.assertFalse(bot.pending_brokers)
+        bot.update_status()
         self.assertEqual(bot.status["note"], "")
+
+    def test_pending_broker_pauses_its_instruments_only(self):
+        broker = StubBroker()
+        bot = make_bot(broker)
+        bot.pending_brokers = {broker}
+        bot.connected_brokers = set()
+        bot.evaluate_strategies()   # zou anders fetch_bars -> AssertionError geven
+        bot.update_status()
+        self.assertIn("wacht op verbinding", bot.status["note"])
 
 
 class BotControlTests(unittest.TestCase):

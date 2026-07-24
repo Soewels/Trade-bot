@@ -96,31 +96,39 @@ class Bot:
         self.status: dict = {"ts": 0, "equity": None, "positions": [],
                              "universe": [], "paused": False,
                              "market": config.BOT_MARKET, "note": ""}
+        # brokerverbindingen: handel met wat wél verbonden is, blijf de rest
+        # proberen (zo draait crypto al terwijl de IB Gateway nog ontbreekt)
+        self.pending_brokers: set = set(self.brokers.values())
+        self.connected_brokers: set = set()
+        self._next_connect_try = 0.0
+        self._connect_delay = 15.0
         self._restore_us_stocks()
         self._restore_crypto()
 
-    def connect_brokers(self, delay: float = 15.0) -> None:
-        """Verbind alle brokers; blijf het proberen tot het lukt.
+    def try_connect_brokers(self) -> None:
+        """Probeer (met backoff) de nog niet verbonden brokers te verbinden."""
+        if not self.pending_brokers or time.time() < self._next_connect_try:
+            return
+        for broker in sorted(self.pending_brokers, key=lambda b: b.name):
+            try:
+                broker.connect()
+                self.pending_brokers.discard(broker)
+                self.connected_brokers.add(broker)
+                self._connect_delay = 15.0
+                log.info("verbonden met %s", broker.name)
+                self.portfolio.notify(f"🔌 Verbonden met {broker.name} — "
+                                      "instrumenten van deze broker doen nu mee")
+            except Exception as exc:
+                log.warning("verbinding met %s lukt nog niet (%s); "
+                            "nieuwe poging over %.0fs",
+                            broker.name, exc, self._connect_delay)
+        if self.pending_brokers:
+            self._next_connect_try = time.time() + self._connect_delay
+            self._connect_delay = min(self._connect_delay * 2, 120)
 
-        Zo kan de bot (en het dashboard) alvast draaien terwijl de IB
-        Gateway nog niet ingelogd is — hij pikt de verbinding vanzelf op."""
-        pending = set(self.brokers.values())
-        while pending:
-            for broker in sorted(pending, key=lambda b: b.name):
-                try:
-                    broker.connect()
-                    pending.discard(broker)
-                    log.info("verbonden met %s", broker.name)
-                except Exception as exc:
-                    log.warning("verbinding met %s lukt nog niet (%s); "
-                                "nieuwe poging over %.0fs", broker.name, exc, delay)
-            if pending:
-                names = ", ".join(sorted(b.name for b in pending))
-                self.status = {**self.status, "ts": time.time(),
-                               "note": f"wacht op verbinding met {names}…"}
-                time.sleep(delay)
-                delay = min(delay * 2, 120)
-        self.status = {**self.status, "note": ""}
+    def total_equity(self) -> float:
+        """Vermogen over de brokers die nu verbonden zijn."""
+        return sum(broker.equity() for broker in self.connected_brokers)
 
     # --- US stock screener --------------------------------------------------------
 
@@ -176,7 +184,8 @@ class Bot:
     def maybe_screen_crypto(self) -> None:
         """Scan alle Kraken-EUR-munten en houd de sterkste stijgers aan."""
         broker = self._kraken_broker()
-        if config.CRYPTO_AUTO_COUNT <= 0 or broker is None:
+        if (config.CRYPTO_AUTO_COUNT <= 0 or broker is None
+                or broker not in self.connected_brokers):
             return
         meta = self.portfolio.meta
         last = float(meta.get("crypto_screened_ts", 0))
@@ -213,7 +222,8 @@ class Bot:
     def maybe_screen_us_stocks(self) -> None:
         """(Re)screen for liquid US stocks when the universe is stale."""
         broker = self._ibkr_broker()
-        if config.US_STOCK_COUNT <= 0 or broker is None:
+        if (config.US_STOCK_COUNT <= 0 or broker is None
+                or broker not in self.connected_brokers):
             return
         meta = self.portfolio.meta
         last = meta.get("us_stocks_screened")
@@ -266,6 +276,8 @@ class Bot:
         changed = False
         for symbol, state in list(self.portfolio.positions.items()):
             broker = self.brokers[symbol]
+            if broker not in self.connected_brokers:
+                continue
             if not broker.market_open(symbol):
                 continue  # cannot execute an exit while the market is closed
             price = broker.latest_price(symbol)
@@ -292,6 +304,8 @@ class Bot:
                 key = (strategy.name, symbol)
                 if self.last_bucket.get(key) == bucket:
                     continue  # this candle was already handled
+                if self.brokers[symbol] not in self.connected_brokers:
+                    continue  # broker (nog) niet verbonden: instrument slaapt
                 if not self.brokers[symbol].market_open(symbol):
                     continue  # no fresh bars and no fills outside market hours
                 self.last_bucket[key] = bucket
@@ -380,7 +394,7 @@ class Bot:
             log.warning("no valid ATR for %s, skipping entry", symbol)
             return
         try:
-            equity = self.portfolio.total_equity()
+            equity = self.total_equity()
             buying_power = broker.buying_power(symbol)
             fx = broker.to_base_rate(symbol)  # e.g. USD stock in a EUR account
         except Exception as exc:
@@ -439,25 +453,31 @@ class Bot:
                               "stop": state.stop_price, "upnl": upnl,
                               "strategy": state.strategy})
         try:
-            equity = self.portfolio.total_equity()
+            equity = self.total_equity() if self.connected_brokers else None
         except Exception as exc:
             log.debug("geen equity voor status: %s", exc)
             equity = self.status.get("equity")
+        note = ""
+        if self.pending_brokers:
+            names = ", ".join(sorted(b.name for b in self.pending_brokers))
+            note = f"wacht op verbinding met {names}…"
         self.status = {"ts": time.time(), "equity": equity,
                        "positions": positions,
                        "universe": self.portfolio.meta.get("us_stocks", []),
                        "paused": self.paused, "market": config.BOT_MARKET,
-                       "note": ""}
+                       "note": note}
 
     # --- daily P&L --------------------------------------------------------------
 
     def roll_daily_pnl(self) -> None:
+        if not self.connected_brokers:
+            return  # nog geen enkele broker: geen zinnig vermogen te loggen
         today = datetime.now(ZoneInfo(config.TIMEZONE)).date().isoformat()
         meta = self.portfolio.meta
         if meta.get("day") == today:
             return
         try:
-            equity = self.portfolio.total_equity()
+            equity = self.total_equity()
         except Exception as exc:
             log.warning("could not read equity for daily P&L: %s", exc)
             return
@@ -477,16 +497,18 @@ class Bot:
     def run(self) -> None:
         log.info("market profile: %s — instruments: %s",
                  config.BOT_MARKET, ", ".join(config.INSTRUMENTS))
-        self.connect_brokers()
-        equity = self.portfolio.total_equity()
-        log.info("total equity across brokers: %.2f", equity)
+        self.try_connect_brokers()
         self.portfolio.reconcile()
+        connected = ", ".join(sorted(b.name for b in self.connected_brokers)) or "nog geen"
+        waiting = ", ".join(sorted(b.name for b in self.pending_brokers))
         self.portfolio.notify(
-            f"🤖 Multi-bot gestart ({config.BOT_MARKET}): "
-            f"{', '.join(config.INSTRUMENTS)} — vermogen {equity:.2f}")
+            f"🤖 Multi-bot gestart ({config.BOT_MARKET}) — verbonden: {connected}"
+            + (f"; wacht op: {waiting}" if waiting else "")
+            + " — instrumenten van verbonden brokers handelen direct mee")
         backoff = config.POLL_SECONDS
         while True:
             try:
+                self.try_connect_brokers()
                 self.process_close_all()
                 self.maybe_screen_crypto()
                 self.maybe_screen_us_stocks()
