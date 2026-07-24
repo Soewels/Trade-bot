@@ -476,12 +476,23 @@ class Bot:
         brokers = [{"name": b.name, "connected": b in self.connected_brokers}
                    for b in sorted(set(self.brokers.values()),
                                    key=lambda b: b.name)]
+        try:
+            sleeves = {
+                "crypto": {"used": round(self.sleeve_exposure(True), 2),
+                           "budget": config.CRYPTO_BUDGET or None},
+                "stocks": {"used": round(self.sleeve_exposure(False), 2),
+                           "budget": config.STOCKS_BUDGET or None},
+            }
+        except Exception as exc:
+            log.debug("geen verdeling voor status: %s", exc)
+            sleeves = self.status.get("sleeves", {})
         self.status = {"ts": time.time(), "equity": equity,
                        "positions": positions,
                        "universe": self.portfolio.meta.get("us_stocks", []),
                        "crypto_universe": self.portfolio.meta.get(
                            "crypto_universe", self._crypto_symbols()),
                        "brokers": brokers,
+                       "sleeves": sleeves,
                        "equity_history": history,
                        "paused": self.paused, "market": config.BOT_MARKET,
                        "note": note}

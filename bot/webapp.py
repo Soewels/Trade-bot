@@ -47,6 +47,8 @@ PAGE = """<!doctype html>
  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
  .tile{background:#2c2c2e;border-radius:10px;padding:8px 10px}
  .tile .v{font-size:1.05rem;font-weight:700} .tile .k{color:#999;font-size:.75rem}
+ .bar{background:#3a3a3c;border-radius:6px;height:7px;overflow:hidden;margin-top:6px}
+ .bar>div{background:#4c8bd9;height:100%}
 </style></head><body>
 <h1>🤖 Multi-bot <span id="paused" class="muted"></span></h1>
 
@@ -55,6 +57,9 @@ PAGE = """<!doctype html>
  <div id="spark"></div>
  <div class="muted" id="meta"></div>
  <div id="brokers"></div></div>
+
+<div class="card"><div class="muted">Verdeling</div>
+ <div class="grid" id="sleeves"></div></div>
 
 <div class="card"><div class="muted">Open posities</div>
  <table id="positions"></table></div>
@@ -113,6 +118,22 @@ async function refresh(){
   document.getElementById("brokers").innerHTML = (s.brokers||[]).map(b =>
     `<span class="badge ${b.connected?"ok":"wait"}">`+
     `${b.connected?"✅":"⏳"} ${b.name}</span>`).join("");
+
+  const sl = s.sleeves || {};
+  const used = (sl.crypto?.used ?? 0) + (sl.stocks?.used ?? 0);
+  const free = (s.equity===null||s.equity===undefined) ? null : s.equity - used;
+  const sleeveTile = (icon, label, box) => {
+    if(!box) return "";
+    const budget = box.budget ? ` <span class=muted>van ${fmt(box.budget,0)}</span>` : "";
+    const barw = box.budget ? Math.min(100, box.used/box.budget*100) : 0;
+    return `<div class=tile><div class=v>€ ${fmt(box.used)}${budget}</div>`+
+      `<div class=k>${icon} ${label}</div>`+
+      (box.budget?`<div class=bar><div style="width:${barw}%"></div></div>`:"")+`</div>`;
+  };
+  document.getElementById("sleeves").innerHTML =
+    sleeveTile("🪙","In crypto", sl.crypto) +
+    sleeveTile("📈","In aandelen/ETF's", sl.stocks) +
+    `<div class=tile><div class=v>€ ${fmt(free)}</div><div class=k>💶 Vrij</div></div>`;
 
   let rows = "<tr><th>Instrument</th><th>Kant</th><th>Instap</th><th>Nu</th>"+
              "<th>Stop</th><th>Resultaat</th></tr>";
