@@ -80,6 +80,38 @@ ATR_PERIOD = 14
 RISK_PER_TRADE = 0.01          # a 1 ATR adverse move == 1% of account equity
 MAX_NOTIONAL_FRACTION = 0.95   # never spend more than this fraction of buying power
 
+# --- crypto-instrumenten (eu-profiel, via Kraken) -----------------------------------
+# Komma-gescheiden lijst van munten die de breakout-strategie handelt, bv.:
+#   CRYPTO_SYMBOLS=BTC/EUR,ETH/EUR,DOGE/EUR,PEPE/EUR
+# Alles wat Kraken in EUR aanbiedt werkt; de bot controleert de paren bij het
+# opstarten. Let op met meme coins: de ATR-sizing maakt de posities vanzelf
+# klein, maar sprongen kunnen over een stop heen schieten.
+
+def kraken_pair(symbol: str) -> str:
+    """Kraken-paarcode voor een BASE/QUOTE-symbool (BTC heet er XBT, DOGE XDG)."""
+    base, _, quote = symbol.partition("/")
+    aliases = {"BTC": "XBT", "DOGE": "XDG"}
+    return aliases.get(base, base) + quote
+
+
+def parse_crypto_symbols(raw: str) -> list[str]:
+    symbols: list[str] = []
+    for part in raw.split(","):
+        part = part.strip().upper()
+        if not part:
+            continue
+        if "/" not in part:
+            raise ValueError(f"crypto-symbool '{part}' mist een '/': "
+                             "gebruik bv. BTC/EUR of DOGE/EUR")
+        if part not in symbols:
+            symbols.append(part)
+    if not symbols:
+        raise ValueError("CRYPTO_SYMBOLS bevat geen geldig symbool")
+    return symbols
+
+
+CRYPTO_SYMBOLS = parse_crypto_symbols(os.environ.get("CRYPTO_SYMBOLS", "BTC/EUR"))
+
 # --- market profiles ------------------------------------------------------------------
 # Instrument notes for "eu" (all EUR, Xetra = IBKR exchange code IBIS):
 #   SXR8 = iShares Core S&P 500 UCITS ETF (SPY equivalent)
@@ -96,14 +128,15 @@ MARKETS = {
             "SXRV": {"broker": "ibkr", "exchange": "IBIS", "currency": "EUR"},
             "4GLD": {"broker": "ibkr", "exchange": "IBIS", "currency": "EUR"},
             "OD7F": {"broker": "ibkr", "exchange": "IBIS", "currency": "EUR"},
-            "BTC/EUR": {"broker": "kraken", "pair": "XBTEUR"},
+            **{sym: {"broker": "kraken", "pair": kraken_pair(sym)}
+               for sym in CRYPTO_SYMBOLS},
         },
         "mean_reversion_symbols": {"SXR8": 1.5, "SXRV": 1.8},
-        "momentum_symbols": ["BTC/EUR"],
+        "momentum_symbols": list(CRYPTO_SYMBOLS),
         "trend_symbols": ["4GLD", "OD7F"],
         # if both are long, no new crypto longs (correlation filter)
         "risk_on_pair": ("SXR8", "SXRV"),
-        "correlation_blocked_symbol": "BTC/EUR",
+        "correlation_blocked_symbols": set(CRYPTO_SYMBOLS),
     },
     "us": {
         "timezone": "America/New_York",
@@ -118,7 +151,7 @@ MARKETS = {
         "momentum_symbols": ["BTC/USD"],
         "trend_symbols": ["GLD", "USO"],
         "risk_on_pair": ("SPY", "QQQ"),
-        "correlation_blocked_symbol": "BTC/USD",
+        "correlation_blocked_symbols": {"BTC/USD"},
     },
 }
 
@@ -129,7 +162,7 @@ MARKET = MARKETS[BOT_MARKET]
 INSTRUMENTS = MARKET["instruments"]
 TIMEZONE = MARKET["timezone"]
 RISK_ON_PAIR = MARKET["risk_on_pair"]
-CORRELATION_BLOCKED_SYMBOL = MARKET["correlation_blocked_symbol"]
+CORRELATION_BLOCKED_SYMBOLS = MARKET["correlation_blocked_symbols"]
 
 # --- strategy parameters -----------------------------------------------------------------
 MEAN_REVERSION = {

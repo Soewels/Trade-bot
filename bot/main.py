@@ -281,7 +281,7 @@ class Bot:
             # Reversal: close the opposite position first.
             self.portfolio.close_position(symbol, f"reversal: {signal.reason}")
 
-        if (signal.action == "long" and symbol == config.CORRELATION_BLOCKED_SYMBOL
+        if (signal.action == "long" and symbol in config.CORRELATION_BLOCKED_SYMBOLS
                 and self.risk.correlation_blocks_crypto_long(
                     self.portfolio.position_sides())):
             log.info("correlation filter: %s and %s are both long, "

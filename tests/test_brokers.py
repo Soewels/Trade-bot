@@ -24,7 +24,8 @@ class ConfigProfileTests(unittest.TestCase):
         self.assertEqual(strategy_symbols, set(market["instruments"]))
         for sym in market["risk_on_pair"]:
             self.assertIn(sym, market["instruments"])
-        self.assertIn(market["correlation_blocked_symbol"], market["instruments"])
+        for sym in market["correlation_blocked_symbols"]:
+            self.assertIn(sym, market["instruments"])
         # EU instruments must be EUR-denominated and not on Alpaca
         for sym, meta in market["instruments"].items():
             self.assertNotEqual(meta["broker"], "alpaca")
@@ -99,6 +100,43 @@ class KrakenPaperModeTests(unittest.TestCase):
                                 paper_state_file=self.state_path)
         self.assertAlmostEqual(reloaded.paper["cash"], 7_500.0)
         self.assertAlmostEqual(reloaded.paper["qty"]["BTC/EUR"], 0.05)
+
+
+class CryptoConfigTests(unittest.TestCase):
+    def test_kraken_pair_uses_kraken_aliases(self):
+        self.assertEqual(config.kraken_pair("BTC/EUR"), "XBTEUR")
+        self.assertEqual(config.kraken_pair("DOGE/EUR"), "XDGEUR")
+        self.assertEqual(config.kraken_pair("ETH/EUR"), "ETHEUR")
+        self.assertEqual(config.kraken_pair("PEPE/EUR"), "PEPEEUR")
+
+    def test_parse_crypto_symbols(self):
+        self.assertEqual(
+            config.parse_crypto_symbols("btc/eur, eth/eur ,BTC/EUR"),
+            ["BTC/EUR", "ETH/EUR"])  # genormaliseerd en ontdubbeld
+        with self.assertRaises(ValueError):
+            config.parse_crypto_symbols("DOGE")  # geen quote-valuta
+        with self.assertRaises(ValueError):
+            config.parse_crypto_symbols(" , ")
+
+    def test_connect_validates_pairs(self):
+        orig = kraken_broker.kraken.fetch_price
+
+        def only_btc(pair, timeout=10):
+            if pair != "XBTEUR":
+                raise Exception("Unknown asset pair")
+            return 50_000.0
+
+        kraken_broker.kraken.fetch_price = only_btc
+        try:
+            good = KrakenBroker({"BTC/EUR": "XBTEUR"},
+                                paper_state_file="/tmp/nonexistent-kp.json")
+            good.connect()  # mag niet gooien
+            bad = KrakenBroker({"NEP/EUR": "NEPEUR"},
+                               paper_state_file="/tmp/nonexistent-kp.json")
+            with self.assertRaises(BrokerError):
+                bad.connect()
+        finally:
+            kraken_broker.kraken.fetch_price = orig
 
 
 class RiskOnPairTests(unittest.TestCase):

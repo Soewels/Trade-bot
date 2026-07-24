@@ -44,6 +44,18 @@ class KrakenBroker(Broker):
     def is_paper(self) -> bool:
         return self.exchange is None
 
+    def connect(self) -> None:
+        """Controleer bij het opstarten of Kraken alle geconfigureerde paren kent
+        (vangt typfouten in CRYPTO_SYMBOLS meteen af, met een duidelijke melding)."""
+        for symbol, pair in self.pairs.items():
+            try:
+                kraken.fetch_price(pair)
+            except Exception as exc:
+                raise BrokerError(
+                    f"Kraken kent handelspaar {pair} ({symbol}) niet of is "
+                    f"onbereikbaar: {exc}") from exc
+        log.info("Kraken-paren gecontroleerd: %s", ", ".join(self.pairs.values()))
+
     def _pair(self, symbol: str) -> str:
         return self.pairs[symbol]
 
