@@ -27,7 +27,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config
-from bot import screener
+from bot import crypto_screener, screener
 from bot.brokers import BrokerError, build_brokers
 from bot.indicators import atr_last
 from bot.models import Bar, Signal
@@ -97,6 +97,7 @@ class Bot:
                              "universe": [], "paused": False,
                              "market": config.BOT_MARKET, "note": ""}
         self._restore_us_stocks()
+        self._restore_crypto()
 
     def connect_brokers(self, delay: float = 15.0) -> None:
         """Verbind alle brokers; blijf het proberen tot het lukt.
@@ -143,6 +144,71 @@ class Bot:
             return
         for symbol in self.portfolio.meta.get("us_stocks", []):
             self._register_us_stock(symbol)
+
+    # --- crypto-screener ------------------------------------------------------------
+
+    def _kraken_broker(self):
+        return next((b for b in set(self.brokers.values()) if b.name == "kraken"),
+                    None)
+
+    def _momentum(self):
+        return next(s for s in self.strategies if s.name == "momentum_breakout")
+
+    def _crypto_symbols(self) -> list[str]:
+        broker = self._kraken_broker()
+        return [s for s in self._momentum().symbols
+                if self.brokers.get(s) is broker]
+
+    def _register_crypto(self, symbol: str) -> None:
+        broker = self._kraken_broker()
+        broker.add_pair(symbol, config.kraken_pair(symbol))
+        self.brokers[symbol] = broker
+        momentum = self._momentum()
+        if symbol not in momentum.symbols:
+            momentum.symbols.append(symbol)
+
+    def _restore_crypto(self) -> None:
+        if self._kraken_broker() is None:
+            return
+        for symbol in self.portfolio.meta.get("crypto_universe", []):
+            self._register_crypto(symbol)
+
+    def maybe_screen_crypto(self) -> None:
+        """Scan alle Kraken-EUR-munten en houd de sterkste stijgers aan."""
+        broker = self._kraken_broker()
+        if config.CRYPTO_AUTO_COUNT <= 0 or broker is None:
+            return
+        meta = self.portfolio.meta
+        last = float(meta.get("crypto_screened_ts", 0))
+        if time.time() - last < config.CRYPTO_RESCAN_HOURS * 3600:
+            return
+        meta["crypto_screened_ts"] = time.time()  # ook bij falen: geen retry-storm
+        self.portfolio.save()
+        try:
+            picks = crypto_screener.scan_kraken(config.CRYPTO_AUTO_COUNT,
+                                                config.CRYPTO_MIN_EUR_VOLUME)
+        except Exception as exc:
+            log.warning("crypto-scan mislukt (nieuwe poging over %.0f uur): %s",
+                        config.CRYPTO_RESCAN_HOURS, exc)
+            return
+        momentum = self._momentum()
+        current = self._crypto_symbols()
+        held = {s for s in current if s in self.portfolio.positions}
+        universe = screener.merge_universe(current, held, picks,
+                                           config.CRYPTO_AUTO_COUNT)
+        for symbol in current:
+            if symbol not in universe:
+                momentum.symbols.remove(symbol)
+                self.brokers.pop(symbol, None)
+        for symbol in universe:
+            if symbol not in current:
+                self._register_crypto(symbol)
+        if universe != current:
+            self.portfolio.notify("🪙 Crypto-selectie bijgewerkt: "
+                                  + (", ".join(universe) or "geen stijgers gevonden"))
+        meta["crypto_universe"] = universe
+        self.portfolio.save()
+        log.info("crypto universe: %s", ", ".join(universe) or "leeg")
 
     def maybe_screen_us_stocks(self) -> None:
         """(Re)screen for liquid US stocks when the universe is stale."""
@@ -281,7 +347,10 @@ class Bot:
             # Reversal: close the opposite position first.
             self.portfolio.close_position(symbol, f"reversal: {signal.reason}")
 
-        if (signal.action == "long" and symbol in config.CORRELATION_BLOCKED_SYMBOLS
+        is_crypto = (symbol in config.CORRELATION_BLOCKED_SYMBOLS
+                     or (self._kraken_broker() is not None
+                         and self.brokers.get(symbol) is self._kraken_broker()))
+        if (signal.action == "long" and is_crypto
                 and self.risk.correlation_blocks_crypto_long(
                     self.portfolio.position_sides())):
             log.info("correlation filter: %s and %s are both long, "
@@ -390,6 +459,7 @@ class Bot:
         while True:
             try:
                 self.process_close_all()
+                self.maybe_screen_crypto()
                 self.maybe_screen_us_stocks()
                 self.roll_daily_pnl()
                 self.check_stops()

@@ -113,6 +113,19 @@ converts the USD ATR to EUR at the live exchange rate, so the 1%-of-equity
 risk rule holds exactly in your account currency. US stocks trade during
 US market hours (15:30–22:00 CET).
 
+### Self-screened crypto (Kraken)
+
+By default the bot also picks its own coins (`CRYPTO_AUTO_COUNT=5`, `0` =
+off): every `CRYPTO_RESCAN_HOURS` (12h) it scans **all** Kraken EUR pairs,
+filters for real liquidity (≥ `CRYPTO_MIN_EUR_VOLUME`, €2M/day, stablecoins
+and darkpool pairs excluded), and scores the most-traded coins on 1-hour
+momentum (24h/48h rise, bonus when price sits at the 20-hour high). The
+strongest risers become the breakout strategy's universe; coins with an
+open position are never swapped out, and only rising coins qualify — in a
+falling market the universe simply shrinks. The fixed `CRYPTO_SYMBOLS`
+list is the seed until the first scan completes (and the whole universe
+when auto mode is off).
+
 ### Notes on shorting (EU)
 
 Shorting UCITS ETFs requires an IBKR **margin account** plus borrowable

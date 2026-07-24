@@ -59,6 +59,10 @@ class KrakenBroker(Broker):
     def _pair(self, symbol: str) -> str:
         return self.pairs[symbol]
 
+    def add_pair(self, symbol: str, pair: str) -> None:
+        """Registreer een (door de screener gekozen) munt tijdens het draaien."""
+        self.pairs.setdefault(symbol, pair)
+
     # --- account ---------------------------------------------------------
 
     def equity(self) -> float:
