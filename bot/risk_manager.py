@@ -23,18 +23,22 @@ class RiskManager:
         self.risk_on_pair = tuple(risk_on_pair)
 
     def position_size(self, equity: float, price: float, atr: float,
-                      buying_power: float, fractional: bool) -> float:
+                      buying_power: float, fractional: bool,
+                      max_notional: Optional[float] = None) -> float:
         """Quantity such that a 1 ATR adverse move loses risk_per_trade of equity.
 
         Quiet instruments (small ATR) get larger positions, volatile ones
         smaller — dollar risk stays constant. The size is capped so the
-        notional never exceeds the available buying power.
+        notional never exceeds the available buying power, nor the optional
+        `max_notional` (the remaining sleeve budget, e.g. CRYPTO_BUDGET).
         """
         if equity <= 0 or price <= 0 or atr <= 0:
             return 0.0
         qty = (equity * self.risk_per_trade) / atr
         max_qty = (buying_power * self.max_notional_fraction) / price
         qty = min(qty, max_qty)
+        if max_notional is not None:
+            qty = min(qty, max_notional / price)
         if fractional:
             return math.floor(qty * 1e6) / 1e6
         return float(math.floor(qty))

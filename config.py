@@ -80,6 +80,11 @@ ATR_PERIOD = 14
 RISK_PER_TRADE = 0.01          # a 1 ATR adverse move == 1% of account equity
 MAX_NOTIONAL_FRACTION = 0.95   # never spend more than this fraction of buying power
 
+# Aparte potjes (in EUR/basisvaluta): maximaal totaalbedrag aan open posities
+# per categorie. 0 = geen limiet (dan begrenst alleen het brokersaldo).
+CRYPTO_BUDGET = float(os.environ.get("CRYPTO_BUDGET", "0"))
+STOCKS_BUDGET = float(os.environ.get("STOCKS_BUDGET", "0"))
+
 # --- crypto-instrumenten (eu-profiel, via Kraken) -----------------------------------
 # Komma-gescheiden lijst van munten die de breakout-strategie handelt, bv.:
 #   CRYPTO_SYMBOLS=BTC/EUR,ETH/EUR,DOGE/EUR,PEPE/EUR

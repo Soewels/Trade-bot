@@ -45,6 +45,10 @@ customers) — no US-domiciled ETFs anywhere.
   or SPY **and** QQQ) are long, no new Bitcoin longs are opened — no
   tripling up on risk-on exposure.
 - Position notional is additionally capped at 95% of available buying power.
+- **Separate budgets** (optional): `CRYPTO_BUDGET` and `STOCKS_BUDGET` in
+  `.env` cap the total open position value per category (in your base
+  currency; `0` = unlimited). New entries are shrunk to fit the remaining
+  room, or skipped when the budget is full.
 
 ## Setup (EU profile)
 
