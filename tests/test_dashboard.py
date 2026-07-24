@@ -150,6 +150,9 @@ class BotControlTests(unittest.TestCase):
         self.assertGreater(bot.status["equity"], 0)
         self.assertEqual(len(bot.status["equity_history"]), 1)
         self.assertTrue(all(b["connected"] for b in bot.status["brokers"]))
+        # StubBroker heet geen "kraken": de positie telt als aandelen-potje
+        self.assertEqual(bot.status["sleeves"]["stocks"]["used"], 220.0)
+        self.assertEqual(bot.status["sleeves"]["crypto"]["used"], 0.0)
 
 
 class DashboardHttpTests(unittest.TestCase):
