@@ -144,16 +144,21 @@ class BotControlTests(unittest.TestCase):
             stop_price_fn=lambda fill: fill - 2.0)
         state.extra["last_price"] = 110.0
         bot.update_status()
-        self.assertEqual(bot.status["positions"][0]["upnl"], 20.0)
+        position = bot.status["positions"][0]
+        self.assertEqual(position["upnl"], 20.0)
+        self.assertEqual(position["last_price"], 110.0)
         self.assertGreater(bot.status["equity"], 0)
+        self.assertEqual(len(bot.status["equity_history"]), 1)
+        self.assertTrue(all(b["connected"] for b in bot.status["brokers"]))
 
 
 class DashboardHttpTests(unittest.TestCase):
     def setUp(self):
         self.bot = make_bot(StubBroker())
         self.bot.update_status()
-        self.dashboard = Dashboard(self.bot, config.TRADES_CSV,
-                                   "127.0.0.1", 0, access_code="geheim")
+        self.dashboard = Dashboard(self.bot, self.bot.portfolio.trades_csv,
+                                   "127.0.0.1", 0, access_code="geheim",
+                                   daily_pnl_csv=self.bot.portfolio.daily_pnl_csv)
         self.port = self.dashboard.start()
         self.base = f"http://127.0.0.1:{self.port}"
 
@@ -178,7 +183,20 @@ class DashboardHttpTests(unittest.TestCase):
             state = json.loads(resp.read())
         self.assertIn("equity", state)
         self.assertIn("trades", state)
+        self.assertIn("stats", state)
+        self.assertIn("daily", state)
+        self.assertIn("brokers", state)
+        self.assertIn("crypto_universe", state)
         self.assertFalse(state["paused"])
+
+    def test_stats_reflect_completed_trades(self):
+        symbol = next(iter(config.INSTRUMENTS))
+        self.bot.portfolio.open_position(symbol, "long", 2.0, "test", atr=2.0,
+                                         stop_price_fn=lambda fill: fill - 2.0)
+        self.bot.portfolio.close_position(symbol, "test-exit")  # pnl 0.00
+        stats = self.dashboard.state()["stats"]
+        self.assertEqual(stats["count"], 1)
+        self.assertEqual(stats["total"], 0.0)
 
     def test_wrong_code_is_rejected(self):
         status, body = self._post("/api/pause", {"code": "fout"})
