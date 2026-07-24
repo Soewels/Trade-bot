@@ -321,6 +321,26 @@ class Bot:
             state.atr = atr
             self.portfolio.save()
 
+    def _is_crypto(self, symbol: str) -> bool:
+        return (symbol in config.CORRELATION_BLOCKED_SYMBOLS
+                or (self._kraken_broker() is not None
+                    and self.brokers.get(symbol) is self._kraken_broker()))
+
+    def sleeve_exposure(self, crypto: bool) -> float:
+        """Huidige totale positiewaarde (basisvaluta) van één potje."""
+        total = 0.0
+        for symbol, state in self.portfolio.positions.items():
+            if self._is_crypto(symbol) != crypto:
+                continue
+            price = state.extra.get("last_price") or state.entry_price
+            fx = 1.0
+            try:
+                fx = self.brokers[symbol].to_base_rate(symbol)
+            except Exception:  # geen koers? entry-waarde is goed genoeg
+                pass
+            total += state.qty * price * fx
+        return total
+
     def execute(self, strategy: Strategy, symbol: str, signal: Signal,
                 bars: list[Bar]) -> None:
         broker = self.brokers[symbol]
@@ -347,9 +367,7 @@ class Bot:
             # Reversal: close the opposite position first.
             self.portfolio.close_position(symbol, f"reversal: {signal.reason}")
 
-        is_crypto = (symbol in config.CORRELATION_BLOCKED_SYMBOLS
-                     or (self._kraken_broker() is not None
-                         and self.brokers.get(symbol) is self._kraken_broker()))
+        is_crypto = self._is_crypto(symbol)
         if (signal.action == "long" and is_crypto
                 and self.risk.correlation_blocks_crypto_long(
                     self.portfolio.position_sides())):
@@ -368,9 +386,20 @@ class Bot:
         except Exception as exc:
             log.error("could not read account for %s entry: %s", symbol, exc)
             return
+        budget = config.CRYPTO_BUDGET if is_crypto else config.STOCKS_BUDGET
+        max_notional = None
+        if budget > 0:
+            remaining = budget - self.sleeve_exposure(is_crypto)
+            if remaining <= 0:
+                log.info("budget %s (%.2f) is vol: entry %s overgeslagen",
+                         "crypto" if is_crypto else "aandelen/ETF's",
+                         budget, symbol)
+                return
+            max_notional = remaining
         qty = self.risk.position_size(equity, bars[-1].close * fx, atr * fx,
                                       buying_power,
-                                      fractional=broker.allows_fractional(symbol))
+                                      fractional=broker.allows_fractional(symbol),
+                                      max_notional=max_notional)
         self.portfolio.open_position(
             symbol, signal.action, qty, strategy.name, atr,
             stop_price_fn=lambda fill: self.risk.hard_stop_price(
