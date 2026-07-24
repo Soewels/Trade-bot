@@ -19,7 +19,7 @@ from .base import Broker, BrokerError, Fill
 
 log = logging.getLogger("alpaca_bot.broker.kraken")
 
-INTERVAL_BY_MINUTES = {15: "15m", 60: "1h", 240: "4h"}
+INTERVAL_BY_MINUTES = {5: "5m", 15: "15m", 30: "30m", 60: "1h", 240: "4h"}
 
 
 class KrakenBroker(Broker):
