@@ -106,18 +106,73 @@ const chips = (arr, c="") => arr.length
   ? arr.map(x=>`<span class="badge ${c}">${x}</span>`).join("")
   : "<span class=muted>geen</span>";
 
-function spark(points){
- if(!points || points.length < 2) return "";
- const w=600, h=70;
+// Broker-stijl grafiek: bedragen op de as, datums eronder, en een
+// aanwijzer (muis of vinger) die per punt datum + bedrag toont.
+function renderChart(elId, points){
+ const el = document.getElementById(elId);
+ if(!el) return;
+ if(el.dataset.hover==="1") return;  // niet verversen terwijl je aanwijst
+ if(!points || points.length < 2){
+   el.innerHTML = "<span class=muted>nog te weinig data voor een grafiek</span>";
+   return;
+ }
+ const W=600, H=150, L=6, R=66, T=10, B=20, iw=W-L-R, ih=H-T-B;
  const ts=points.map(p=>p[0]), vs=points.map(p=>p[1]);
- const t0=Math.min(...ts), dt=(Math.max(...ts)-t0)||1;
- const v0=Math.min(...vs), dv=(Math.max(...vs)-v0)||1;
- const pts=points.map(p=>((p[0]-t0)/dt*w).toFixed(1)+","+
-                         (h-5-(p[1]-v0)/dv*(h-10)).toFixed(1)).join(" ");
- const up = vs[vs.length-1] >= vs[0];
- return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"
-   style="width:100%;height:70px;margin-top:6px"><polyline fill="none"
-   stroke="${up ? "#4cd964" : "#ff453a"}" stroke-width="2" points="${pts}"/></svg>`;
+ const t0=Math.min(...ts), t1=Math.max(...ts), dt=(t1-t0)||1;
+ let v0=Math.min(...vs), v1=Math.max(...vs);
+ if(v1-v0 < 1e-9){ v0-=1; v1+=1; }
+ const X=t=>L+(t-t0)/dt*iw, Y=v=>T+ih-(v-v0)/(v1-v0)*ih;
+ const col = vs[vs.length-1] >= vs[0] ? "#4cd964" : "#ff453a";
+ let grid="";
+ for(let i=0;i<=2;i++){
+   const v=v0+(v1-v0)*i/2, y=Y(v);
+   grid+=`<line x1="${L}" y1="${y}" x2="${L+iw}" y2="${y}" stroke="#2c2c2e"/>`+
+         `<text x="${L+iw+6}" y="${y+4}" fill="#8e8e93" font-size="11">${fmt(v)}</text>`;
+ }
+ const span=t1-t0;
+ const fx=t=>{const d=new Date(t*1000);
+   return span>172800 ? d.toLocaleDateString("nl-BE",{day:"2-digit",month:"2-digit"})
+                      : d.toLocaleTimeString("nl-BE",{hour:"2-digit",minute:"2-digit"});};
+ [[t0,"start"],[(t0+t1)/2,"middle"],[t1,"end"]].forEach(([t,a])=>{
+   grid+=`<text x="${X(t).toFixed(1)}" y="${H-4}" fill="#8e8e93" font-size="11"`+
+         ` text-anchor="${a}">${fx(t)}</text>`;
+ });
+ const line=points.map(p=>`${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(" ");
+ el.style.position="relative";
+ el.innerHTML=
+  `<svg id="${elId}_svg" viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;`+
+  `margin-top:6px;touch-action:pan-y">${grid}`+
+  `<polygon points="${L},${T+ih} ${line} ${(L+iw)},${T+ih}" fill="${col}" opacity="0.12"/>`+
+  `<polyline fill="none" stroke="${col}" stroke-width="2" points="${line}"/>`+
+  `<line id="${elId}_cx" y1="${T}" y2="${T+ih}" stroke="#8e8e93" stroke-dasharray="3,3" visibility="hidden"/>`+
+  `<circle id="${elId}_cp" r="4" fill="${col}" visibility="hidden"/></svg>`+
+  `<div id="${elId}_tip" style="position:absolute;top:0;left:8px;background:#2c2c2ef2;`+
+  `border-radius:6px;padding:3px 9px;font-size:.82rem;display:none;pointer-events:none"></div>`;
+ const svg=document.getElementById(elId+"_svg");
+ const show=(ev)=>{
+   const r=svg.getBoundingClientRect();
+   const px=(ev.clientX-r.left)/r.width*W;
+   let best=0, bd=1e18;
+   points.forEach((p,i)=>{const d=Math.abs(X(p[0])-px); if(d<bd){bd=d;best=i;}});
+   const p=points[best], x=X(p[0]), y=Y(p[1]);
+   const cx=document.getElementById(elId+"_cx"), cp=document.getElementById(elId+"_cp"),
+         tip=document.getElementById(elId+"_tip");
+   cx.setAttribute("x1",x); cx.setAttribute("x2",x); cx.setAttribute("visibility","visible");
+   cp.setAttribute("cx",x); cp.setAttribute("cy",y); cp.setAttribute("visibility","visible");
+   const d=new Date(p[0]*1000);
+   tip.textContent=d.toLocaleDateString("nl-BE",{day:"2-digit",month:"2-digit"})+" "+
+     d.toLocaleTimeString("nl-BE",{hour:"2-digit",minute:"2-digit"})+"  ·  € "+fmt(p[1]);
+   tip.style.display="block";
+   tip.style.left=Math.min(Math.max(0,(x/W)*r.width-45), r.width-150)+"px";
+ };
+ svg.addEventListener("pointermove",show);
+ svg.addEventListener("pointerdown",show);
+ svg.addEventListener("pointerenter",()=>{ el.dataset.hover="1"; });
+ svg.addEventListener("pointerleave",()=>{
+   el.dataset.hover="0";
+   ["_cx","_cp"].forEach(s=>document.getElementById(elId+s)?.setAttribute("visibility","hidden"));
+   const tip=document.getElementById(elId+"_tip"); if(tip) tip.style.display="none";
+ });
 }
 
 function dailyBars(rows){
@@ -125,18 +180,23 @@ function dailyBars(rows){
  if(!days.length) return "";
  const vals=days.map(r=>Number(r.pnl)||0);
  const m=Math.max(...vals.map(Math.abs), 1e-9);
- const w=600, h=90, mid=h/2, slot=w/days.length;
+ const w=600, h=118, plotH=h-16, mid=plotH/2, slot=w/days.length;
  const bw=Math.max(6, Math.min(42, slot-6));
  let out=`<line x1="0" y1="${mid}" x2="${w}" y2="${mid}" stroke="#3a3a3c"/>`;
  days.forEach((r,i)=>{
    const v=Number(r.pnl)||0;
-   const bh=Math.max(1, Math.abs(v)/m*(mid-8));
+   const bh=Math.max(1, Math.abs(v)/m*(mid-16));
    const x=i*slot+(slot-bw)/2, y=v>=0? mid-bh : mid;
+   const label=Math.abs(v)>=10? fmt(v,0) : fmt(v,1);
    out+=`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}"`+
         ` height="${bh.toFixed(1)}" rx="2" fill="${v>=0?"#4cd964":"#ff453a"}">`+
-        `<title>${r.date}: ${fmt(v)}</title></rect>`;
+        `<title>${r.date}: ${fmt(v)}</title></rect>`+
+        `<text x="${(x+bw/2).toFixed(1)}" y="${(v>=0? y-4 : y+bh+11).toFixed(1)}"`+
+        ` fill="${v>=0?"#4cd964":"#ff453a"}" font-size="10" text-anchor="middle">${label}</text>`+
+        `<text x="${(x+bw/2).toFixed(1)}" y="${h-3}" fill="#8e8e93" font-size="10"`+
+        ` text-anchor="middle">${r.date.slice(8)}/${r.date.slice(5,7)}</text>`;
  });
- return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:90px;margin:6px 0">${out}</svg>`;
+ return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;margin:6px 0">${out}</svg>`;
 }
 
 function hbars(list){
@@ -156,7 +216,7 @@ async function refresh(){
  try{
   const s = await (await fetch("api/state")).json();
   document.getElementById("equity").textContent = "€ " + fmt(s.equity);
-  document.getElementById("spark").innerHTML = spark(s.equity_history);
+  renderChart("spark", s.equity_history);
   document.getElementById("paused").textContent = s.paused ? "⏸ gepauzeerd" : "";
   document.getElementById("meta").textContent =
     s.market + " · " + (s.note ? s.note + " · " : "") +
@@ -204,9 +264,7 @@ async function refresh(){
   ].map(([k,v,c])=>`<div class=tile><div class="v ${c}">${v}</div>`+
                    `<div class=k>${k}</div></div>`).join("");
 
-  document.getElementById("cum").innerHTML =
-    (s.trade_curve||[]).length > 1 ? spark(s.trade_curve) :
-    "<span class=muted>nog te weinig trades voor een grafiek</span>";
+  renderChart("cum", s.trade_curve);
   document.getElementById("dailybars").innerHTML = dailyBars(s.daily||[]);
   document.getElementById("perinstr").innerHTML = hbars(s.per_instrument||[]);
 
