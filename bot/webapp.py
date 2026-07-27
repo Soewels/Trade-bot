@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import threading
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 log = logging.getLogger("alpaca_bot.webapp")
@@ -65,10 +66,16 @@ PAGE = """<!doctype html>
  <table id="positions"></table></div>
 
 <div class="card"><div class="muted">Resultaten (afgeronde trades)</div>
- <div class="grid" id="stats"></div></div>
+ <div class="grid" id="stats"></div>
+ <div class="muted" style="margin-top:10px">Verloop gerealiseerde winst</div>
+ <div id="cum"></div></div>
 
 <div class="card"><div class="muted">Dagresultaten</div>
+ <div id="dailybars"></div>
  <table id="daily"></table></div>
+
+<div class="card"><div class="muted">Resultaat per instrument</div>
+ <div id="perinstr"></div></div>
 
 <div class="card"><div class="muted">Crypto-selectie (zelf gekozen stijgers)</div>
  <div id="crypto"></div>
@@ -111,6 +118,38 @@ function spark(points){
  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"
    style="width:100%;height:70px;margin-top:6px"><polyline fill="none"
    stroke="${up ? "#4cd964" : "#ff453a"}" stroke-width="2" points="${pts}"/></svg>`;
+}
+
+function dailyBars(rows){
+ const days=[...rows].reverse();               // oudste links
+ if(!days.length) return "";
+ const vals=days.map(r=>Number(r.pnl)||0);
+ const m=Math.max(...vals.map(Math.abs), 1e-9);
+ const w=600, h=90, mid=h/2, slot=w/days.length;
+ const bw=Math.max(6, Math.min(42, slot-6));
+ let out=`<line x1="0" y1="${mid}" x2="${w}" y2="${mid}" stroke="#3a3a3c"/>`;
+ days.forEach((r,i)=>{
+   const v=Number(r.pnl)||0;
+   const bh=Math.max(1, Math.abs(v)/m*(mid-8));
+   const x=i*slot+(slot-bw)/2, y=v>=0? mid-bh : mid;
+   out+=`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}"`+
+        ` height="${bh.toFixed(1)}" rx="2" fill="${v>=0?"#4cd964":"#ff453a"}">`+
+        `<title>${r.date}: ${fmt(v)}</title></rect>`;
+ });
+ return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:90px;margin:6px 0">${out}</svg>`;
+}
+
+function hbars(list){
+ if(!list||!list.length) return "<span class=muted>nog geen afgeronde trades</span>";
+ const m=Math.max(...list.map(x=>Math.abs(x[1])), 1e-9);
+ return list.map(([sym,v])=>
+   `<div style="display:flex;align-items:center;gap:8px;margin:5px 0">`+
+   `<div style="width:86px" class=muted>${sym}</div>`+
+   `<div style="flex:1"><div style="height:10px;border-radius:5px;`+
+   `width:${(Math.abs(v)/m*100).toFixed(1)}%;min-width:2px;`+
+   `background:${v>=0?"#4cd964":"#ff453a"}"></div></div>`+
+   `<div class="${v>=0?"pos":"neg"}" style="width:76px;text-align:right">${fmt(v)}</div>`+
+   `</div>`).join("");
 }
 
 async function refresh(){
@@ -165,6 +204,12 @@ async function refresh(){
   ].map(([k,v,c])=>`<div class=tile><div class="v ${c}">${v}</div>`+
                    `<div class=k>${k}</div></div>`).join("");
 
+  document.getElementById("cum").innerHTML =
+    (s.trade_curve||[]).length > 1 ? spark(s.trade_curve) :
+    "<span class=muted>nog te weinig trades voor een grafiek</span>";
+  document.getElementById("dailybars").innerHTML = dailyBars(s.daily||[]);
+  document.getElementById("perinstr").innerHTML = hbars(s.per_instrument||[]);
+
   let d = "<tr><th>Datum</th><th>Resultaat</th><th>Vermogen</th></tr>";
   if(!(s.daily||[]).length) d += "<tr><td colspan=3 class=muted>nog geen volledige dag</td></tr>";
   for(const r of (s.daily||[]))
@@ -213,9 +258,38 @@ class Dashboard:
         trades = self._read_csv(self.trades_csv)
         snapshot["trades"] = list(reversed(trades[-15:]))
         snapshot["stats"] = self._stats(trades)
+        snapshot["trade_curve"] = self._trade_curve(trades)
+        snapshot["per_instrument"] = self._per_instrument(trades)
         daily = self._read_csv(self.daily_pnl_csv) if self.daily_pnl_csv else []
-        snapshot["daily"] = list(reversed(daily[-7:]))
+        snapshot["daily"] = list(reversed(daily[-14:]))
         return snapshot
+
+    @staticmethod
+    def _trade_curve(trades: list[dict]) -> list[list[float]]:
+        """Cumulatieve gerealiseerde winst per trade: [[epoch, cum], ...]."""
+        curve: list[list[float]] = []
+        total = 0.0
+        for row in trades:
+            try:
+                ts = datetime.fromisoformat(row["timestamp"]).timestamp()
+                total += float(row["pnl"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            curve.append([round(ts), round(total, 2)])
+        return curve[-500:]
+
+    @staticmethod
+    def _per_instrument(trades: list[dict]) -> list[list]:
+        """Totaal gerealiseerd resultaat per instrument, beste eerst."""
+        totals: dict[str, float] = {}
+        for row in trades:
+            try:
+                totals[row["instrument"]] = (totals.get(row["instrument"], 0.0)
+                                             + float(row["pnl"]))
+            except (KeyError, TypeError, ValueError):
+                continue
+        ranked = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)
+        return [[symbol, round(total, 2)] for symbol, total in ranked]
 
     @staticmethod
     def _stats(trades: list[dict]) -> dict:

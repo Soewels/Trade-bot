@@ -197,9 +197,12 @@ class DashboardHttpTests(unittest.TestCase):
         self.bot.portfolio.open_position(symbol, "long", 2.0, "test", atr=2.0,
                                          stop_price_fn=lambda fill: fill - 2.0)
         self.bot.portfolio.close_position(symbol, "test-exit")  # pnl 0.00
-        stats = self.dashboard.state()["stats"]
-        self.assertEqual(stats["count"], 1)
-        self.assertEqual(stats["total"], 0.0)
+        state = self.dashboard.state()
+        self.assertEqual(state["stats"]["count"], 1)
+        self.assertEqual(state["stats"]["total"], 0.0)
+        self.assertEqual(len(state["trade_curve"]), 1)
+        self.assertEqual(state["trade_curve"][0][1], 0.0)
+        self.assertEqual(state["per_instrument"], [[symbol, 0.0]])
 
     def test_wrong_code_is_rejected(self):
         status, body = self._post("/api/pause", {"code": "fout"})
