@@ -29,9 +29,28 @@ EXCHANGE_HOURS = {
     "AEB": (dtime(9, 0), dtime(17, 30), "Europe/Amsterdam"),    # Euronext Amsterdam
     "SBF": (dtime(9, 0), dtime(17, 30), "Europe/Paris"),        # Euronext Paris
     "LSEETF": (dtime(8, 0), dtime(16, 30), "Europe/London"),    # LSE ETF segment
+    "LSE": (dtime(8, 0), dtime(16, 30), "Europe/London"),
     "SMART": (dtime(9, 0), dtime(17, 30), "Europe/Berlin"),
     "US": (dtime(9, 30), dtime(16, 0), "America/New_York"),     # NYSE/Nasdaq RTH
+    "SEHK": (dtime(9, 30), dtime(16, 0), "Asia/Hong_Kong"),     # Hongkong
+    "TSEJ": (dtime(9, 0), dtime(15, 0), "Asia/Tokyo"),          # Tokio
+    "EBS": (dtime(9, 0), dtime(17, 30), "Europe/Zurich"),       # SIX Zürich
 }
+
+# primaryExchange (uit de scanner) -> sleutel in EXCHANGE_HOURS. Onbekende
+# beurzen worden door de screener overgeslagen: nooit handelen op een beurs
+# waarvan we de openingstijden niet kennen.
+PRIMARY_TO_HOURS = {
+    "NYSE": "US", "NASDAQ": "US", "ARCA": "US", "AMEX": "US", "BATS": "US",
+    "ISLAND": "US", "IEX": "US",
+    "IBIS": "IBIS", "IBIS2": "IBIS", "AEB": "AEB", "SBF": "SBF",
+    "EBS": "EBS", "SEHK": "SEHK", "TSEJ": "TSEJ",
+}
+
+
+def hours_for_primary_exchange(primary_exchange: str):
+    """EXCHANGE_HOURS-sleutel voor een primaryExchange, of None = onbekend."""
+    return PRIMARY_TO_HOURS.get(primary_exchange)
 
 # reqHistoricalData wants a duration string; pick one that comfortably
 # covers `limit` bars of the given size (~200+ bars for the 200 EMA).
@@ -88,8 +107,11 @@ class IBKRBroker(Broker):
     def _contract(self, symbol: str):
         if symbol not in self._contracts:
             meta = self.instruments[symbol]
+            kwargs = {}
+            if meta.get("primaryExchange"):
+                kwargs["primaryExchange"] = meta["primaryExchange"]
             contract = self._lib.Stock(symbol, meta.get("exchange", "SMART"),
-                                       meta.get("currency", "EUR"))
+                                       meta.get("currency", "EUR"), **kwargs)
             qualified = self.ib.qualifyContracts(contract)
             if not qualified:
                 raise BrokerError(
@@ -176,15 +198,34 @@ class IBKRBroker(Broker):
     # --- screener support --------------------------------------------------------
 
     def scan_most_active(self, min_price: float, min_market_cap_musd: float,
-                         rows: int = 20) -> list[str]:
-        """Most active US stocks via the IBKR market scanner."""
-        sub = self._lib.ScannerSubscription(
-            instrument="STK", locationCode="STK.US.MAJOR",
-            scanCode="MOST_ACTIVE", numberOfRows=rows)
+                         rows: int = 20,
+                         locations: tuple = ("STK.US.MAJOR",)) -> list[dict]:
+        """Most active stocks via the IBKR market scanner, per regio-locatie.
+
+        Geeft per kandidaat symbool, valuta en primaire beurs terug; een
+        locatie die de scanner niet kent wordt overgeslagen met een log."""
         tags = [self._lib.TagValue("priceAbove", str(min_price)),
                 self._lib.TagValue("marketCapAbove1e6", str(min_market_cap_musd))]
-        results = self.ib.reqScannerData(sub, [], tags)
-        return [row.contractDetails.contract.symbol for row in results]
+        candidates: list[dict] = []
+        seen: set[str] = set()
+        for location in locations:
+            sub = self._lib.ScannerSubscription(
+                instrument="STK", locationCode=location,
+                scanCode="MOST_ACTIVE", numberOfRows=rows)
+            try:
+                results = self.ib.reqScannerData(sub, [], tags)
+            except Exception as exc:
+                log.warning("scanner-locatie %s overgeslagen: %s", location, exc)
+                continue
+            for row in results:
+                contract = row.contractDetails.contract
+                if contract.symbol in seen:
+                    continue
+                seen.add(contract.symbol)
+                candidates.append({"symbol": contract.symbol,
+                                   "currency": contract.currency,
+                                   "primaryExchange": contract.primaryExchange})
+        return candidates
 
     # --- currency conversion --------------------------------------------------------
 

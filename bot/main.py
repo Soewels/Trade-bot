@@ -141,9 +141,10 @@ class Bot:
     def _mean_reversion(self):
         return next(s for s in self.strategies if s.name == "mean_reversion")
 
-    def _register_us_stock(self, symbol: str) -> None:
+    def _register_us_stock(self, symbol: str, meta: dict | None = None) -> None:
         broker = self._ibkr_broker()
-        broker.add_instrument(symbol, dict(screener.US_STOCK_META))
+        stored = self.portfolio.meta.get("us_stock_meta", {}).get(symbol)
+        broker.add_instrument(symbol, dict(meta or stored or screener.US_STOCK_META))
         self.brokers[symbol] = broker
         self._mean_reversion().add_symbol(symbol, config.US_STOCK_THRESHOLD)
 
@@ -236,32 +237,38 @@ class Bot:
             return
         meta["us_stocks_screened"] = today.isoformat()  # also on failure: no retry storm
         self.portfolio.save()
+        locations = [loc for region in config.STOCK_REGIONS
+                     for loc in config.REGION_LOCATIONS[region]]
         try:
-            picks = screener.find_liquid_us_stocks(
+            picks, cand_metas = screener.find_liquid_stocks(
                 broker, config.US_STOCK_COUNT, config.US_STOCK_MIN_PRICE,
                 config.US_STOCK_MIN_MARKET_CAP_MUSD,
-                config.US_STOCK_MIN_DOLLAR_VOLUME)
+                config.US_STOCK_MIN_DOLLAR_VOLUME, locations)
         except Exception as exc:
-            log.warning("US stock screening failed (retry in %d days): %s",
+            log.warning("stock screening failed (retry in %d days): %s",
                         config.US_STOCK_RESCAN_DAYS, exc)
             return
         current = list(meta.get("us_stocks", []))
         held = {sym for sym in current if sym in self.portfolio.positions}
         universe = screener.merge_universe(current, held, picks,
                                            config.US_STOCK_COUNT)
+        meta_store = meta.setdefault("us_stock_meta", {})
         for symbol in current:
             if symbol not in universe:
                 self._mean_reversion().remove_symbol(symbol)
                 self.brokers.pop(symbol, None)
+                meta_store.pop(symbol, None)
         for symbol in universe:
             if symbol not in current:
-                self._register_us_stock(symbol)
+                self._register_us_stock(symbol, cand_metas.get(symbol))
+                if cand_metas.get(symbol):
+                    meta_store[symbol] = cand_metas[symbol]
         if universe != current:
-            self.portfolio.notify("🔎 US-aandelen bijgewerkt: "
+            self.portfolio.notify("🔎 Aandelen-selectie bijgewerkt: "
                                   + (", ".join(universe) or "geen"))
         meta["us_stocks"] = universe
         self.portfolio.save()
-        log.info("US stock universe: %s", ", ".join(universe) or "empty")
+        log.info("stock universe: %s", ", ".join(universe) or "empty")
 
     # --- market data ----------------------------------------------------------
 
