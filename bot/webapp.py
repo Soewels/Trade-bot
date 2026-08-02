@@ -140,7 +140,7 @@ button{border-radius:10px;padding:12px 18px;font-size:.95rem;font-weight:600;
  <div class="card"><div class="k">Selecties</div>
   <div class="muted">Crypto — zelf gekozen stijgers</div>
   <div id="crypto" style="margin:4px 0 10px"></div>
-  <div class="muted">US-aandelen — zelf gescreend</div>
+  <div class="muted">Aandelen wereldwijd — zelf gescreend</div>
   <div id="stocks" style="margin-top:4px"></div></div>
  <div class="card"><div class="k">Laatste trades</div>
   <div class="scroll"><table id="trades"></table></div></div>

@@ -58,11 +58,37 @@ KRAKEN_API_KEY = os.environ.get("KRAKEN_API_KEY", "")
 KRAKEN_API_SECRET = os.environ.get("KRAKEN_API_SECRET", "")
 KRAKEN_PAPER_CASH = float(os.environ.get("KRAKEN_PAPER_CASH", "10000"))
 
-# --- US stock screener (eu profile, needs IBKR) ---------------------------------------
-# The bot finds liquid US stocks itself via the IBKR market scanner and adds
-# them to the mean-reversion strategy (individual US stocks are PRIIPs-exempt,
+# --- stock screener (eu profile, needs IBKR) ------------------------------------------
+# The bot finds liquid stocks itself via the IBKR market scanner and adds
+# them to the mean-reversion strategy (individual stocks are PRIIPs-exempt,
 # unlike US ETFs). Set US_STOCK_COUNT=0 to disable.
 US_STOCK_COUNT = int(os.environ.get("US_STOCK_COUNT", "3"))
+
+# Regio's waarin de scanner zoekt (IBKR-scannerlocaties per regio).
+# Let op: Londen (LSE) is bewust uitgesloten — aandelen noteren daar in
+# pence, wat de positiegrootte 100x zou verstoren.
+REGION_LOCATIONS = {
+    "US": ["STK.US.MAJOR"],
+    "EU": ["STK.EU.IBIS", "STK.EU.AEB", "STK.EU.SBF"],
+    "ASIA": ["STK.HK.SEHK", "STK.JP.TSEJ"],
+}
+
+
+def parse_stock_regions(raw: str) -> list[str]:
+    regions = []
+    for part in raw.split(","):
+        part = part.strip().upper()
+        if not part:
+            continue
+        if part not in REGION_LOCATIONS:
+            raise ValueError(f"onbekende aandelenregio '{part}': "
+                             f"kies uit {', '.join(REGION_LOCATIONS)}")
+        if part not in regions:
+            regions.append(part)
+    return regions or ["US"]
+
+
+STOCK_REGIONS = parse_stock_regions(os.environ.get("STOCK_REGIONS", "US,EU,ASIA"))
 US_STOCK_THRESHOLD = 2.0            # entry threshold in std devs (wider: single
                                     # stocks are noisier than index trackers)
 US_STOCK_MIN_PRICE = 10.0           # skip penny-ish stocks

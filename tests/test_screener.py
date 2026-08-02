@@ -1,9 +1,11 @@
-"""Unit tests for the US stock screener (pure logic, no IBKR needed)."""
+"""Unit tests for the worldwide stock screener (pure logic, no IBKR needed)."""
 
 import unittest
 
+import config
+from bot.brokers.ibkr_broker import exchange_is_open, hours_for_primary_exchange
 from bot.models import Bar
-from bot.screener import merge_universe, rank_by_dollar_volume
+from bot.screener import find_liquid_stocks, merge_universe, rank_by_dollar_volume
 from bot.strategies import MeanReversionStrategy
 
 
@@ -39,6 +41,74 @@ class RankingTests(unittest.TestCase):
         ranked = rank_by_dollar_volume({"X": bars}, min_dollar_volume=50e6,
                                        lookback=20)
         self.assertEqual(ranked, [])
+
+    def test_fx_converts_foreign_volume_to_base(self):
+        bars = {
+            "SONY": daily_bars(close=15000.0, volume=5e6),   # JPY: 75 mld lokaal
+            "SAP": daily_bars(close=200.0, volume=400_000),  # EUR: 80M
+        }
+        fx = {"SONY": 0.006, "SAP": 1.0}   # 75 mld JPY -> 450M EUR
+        ranked = rank_by_dollar_volume(bars, min_dollar_volume=50e6, fx=fx)
+        self.assertEqual(ranked, ["SONY", "SAP"])
+        # zonder fx zou SONY 75 mld 'EUR' lijken; met een lage fx valt hij af
+        ranked = rank_by_dollar_volume(bars, min_dollar_volume=50e6,
+                                       fx={"SONY": 0.0000001, "SAP": 1.0})
+        self.assertEqual(ranked, ["SAP"])
+
+
+class WorldwideScreenerTests(unittest.TestCase):
+    def test_stock_regions_config(self):
+        self.assertEqual(config.parse_stock_regions("us, eu"), ["US", "EU"])
+        self.assertEqual(config.parse_stock_regions(""), ["US"])
+        with self.assertRaises(ValueError):
+            config.parse_stock_regions("MARS")
+        for region in config.STOCK_REGIONS:
+            self.assertIn(region, config.REGION_LOCATIONS)
+
+    def test_hours_mapping_and_unknown_exchange(self):
+        self.assertEqual(hours_for_primary_exchange("NYSE"), "US")
+        self.assertEqual(hours_for_primary_exchange("SEHK"), "SEHK")
+        self.assertIsNone(hours_for_primary_exchange("ONBEKEND"))
+        # de gemapte sleutels bestaan ook echt in de openingstijden-tabel
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        noon = datetime(2026, 7, 14, 4, 0, tzinfo=ZoneInfo("UTC"))  # 12:00 HK
+        self.assertTrue(exchange_is_open("SEHK", noon))
+
+    def test_find_liquid_stocks_skips_gbp_and_unknown(self):
+        class ScanStub:
+            def __init__(self):
+                self.instruments = {}
+
+            def scan_most_active(self, min_price, cap, rows, locations):
+                return [
+                    {"symbol": "NVDA", "currency": "USD", "primaryExchange": "NASDAQ"},
+                    {"symbol": "SAP", "currency": "EUR", "primaryExchange": "IBIS"},
+                    {"symbol": "SHEL", "currency": "GBP", "primaryExchange": "LSE"},
+                    {"symbol": "RAAR", "currency": "USD", "primaryExchange": "GEHEIM"},
+                ]
+
+            def add_instrument(self, symbol, meta):
+                self.instruments[symbol] = meta
+
+            def to_base_rate(self, symbol):
+                return 0.9 if self.instruments[symbol]["currency"] == "USD" else 1.0
+
+            def fetch_bars(self, symbol, tf, limit):
+                return daily_bars(close=100.0, volume=2e6)  # 200M lokaal
+
+        broker = ScanStub()
+        ranked, metas = find_liquid_stocks(broker, count=3, min_price=10,
+                                           min_market_cap_musd=1e4,
+                                           min_dollar_volume=50e6,
+                                           locations=["STK.US.MAJOR"])
+        self.assertEqual(set(ranked), {"NVDA", "SAP"})
+        self.assertNotIn("SHEL", metas)   # GBP/pence uitgesloten
+        self.assertNotIn("RAAR", metas)   # onbekende beurs uitgesloten
+        self.assertEqual(metas["SAP"]["hours"], "IBIS")
+        self.assertEqual(metas["NVDA"]["currency"], "USD")
+        # SAP (EUR, fx 1.0) komt boven NVDA (USD, fx 0.9)
+        self.assertEqual(ranked, ["SAP", "NVDA"])
 
 
 class MergeUniverseTests(unittest.TestCase):
