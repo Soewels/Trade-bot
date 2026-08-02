@@ -26,7 +26,8 @@ KRAKEN_BASE_ALIASES = {"XBT": "BTC", "XDG": "DOGE"}
 
 # Stablecoins en tokenized cash: stijgen nooit, dus nutteloos voor momentum.
 STABLE_BASES = {"USDT", "USDC", "DAI", "TUSD", "PYUSD", "EURT", "EURR",
-                "EURQ", "USDG", "USDS", "RLUSD", "USDR", "GUSD", "UST"}
+                "EURQ", "USDG", "USDS", "RLUSD", "USDR", "GUSD", "UST",
+                "EURC", "USDQ", "EURI", "EUROP", "FDUSD", "USDP", "LUSD"}
 
 
 def eur_pairs() -> dict[str, dict]:
