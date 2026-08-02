@@ -1,12 +1,10 @@
-"""Mobiel dashboard voor de multi-bot.
+"""Mobiel dashboard voor de multi-bot — trading-terminal-stijl.
 
-Toont live: totale waarde met verloopgrafiekje, open posities (instap,
-actuele koers, stop en tussentijds resultaat in EUR en %), resultaten-
-statistieken (totaal gerealiseerd, winrate, beste/slechtste trade), de
-laatste dagresultaten, de gekozen crypto-munten en US-aandelen, de
-verbindingsstatus per broker en de laatste trades. Knoppen: pauze (geen
-nieuwe posities) en noodstop (alles verkopen) — beveiligd met een
-toegangscode; meekijken kan zonder.
+Toont live (5s-verversing): totale waarde met delta en verloopgrafiek,
+verdeling over de potjes, open posities met actuele koers en resultaat,
+statistieken, dagresultaten, resultaat per instrument, de gekozen
+munten/aandelen en de laatste trades. Knoppen: pauze en noodstop,
+beveiligd met een toegangscode; meekijken kan zonder.
 
 Standaard luistert de server alleen op localhost (WEB_HOST=127.0.0.1):
 op een VPS kijk je mee via een SSH-tunnel
@@ -29,72 +27,136 @@ PAGE = """<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Multi-bot</title>
 <style>
- body{font-family:-apple-system,system-ui,sans-serif;background:#111;color:#eee;
-      margin:0;padding:12px;max-width:680px;margin-inline:auto}
- h1{font-size:1.2rem;margin:8px 0} .muted{color:#999;font-size:.85rem}
- .card{background:#1c1c1e;border-radius:12px;padding:12px;margin:10px 0}
- .big{font-size:1.7rem;font-weight:700} .pos{color:#4cd964} .neg{color:#ff453a}
- table{width:100%;border-collapse:collapse;font-size:.88rem}
- td,th{padding:4px 6px;text-align:left;border-bottom:1px solid #2c2c2e}
- th{color:#999;font-weight:500}
- button{border:0;border-radius:10px;padding:12px 16px;font-size:1rem;color:#fff;
-        margin-right:8px;margin-top:8px}
- #pause{background:#b58900} #stop{background:#c0392b}
- input{background:#2c2c2e;border:0;border-radius:8px;padding:10px;color:#eee;
-       font-size:1rem;width:130px}
- .badge{display:inline-block;background:#2c2c2e;border-radius:6px;
-        padding:2px 8px;margin:2px;font-size:.85rem}
- .badge.ok{border:1px solid #4cd96455} .badge.wait{border:1px solid #b5890055;color:#caa64b}
- .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
- .tile{background:#2c2c2e;border-radius:10px;padding:8px 10px}
- .tile .v{font-size:1.05rem;font-weight:700} .tile .k{color:#999;font-size:.75rem}
- .bar{background:#3a3a3c;border-radius:6px;height:7px;overflow:hidden;margin-top:6px}
- .bar>div{background:#4c8bd9;height:100%}
+:root{
+ --bg:#0d0d0d; --card:#1a1a19; --tile:#151514; --ring:rgba(255,255,255,.10);
+ --ink:#ffffff; --ink2:#c3c2b7; --mut:#898781; --grid:#2c2c2a; --axis:#383835;
+ --up:#0ca30c; --down:#d03b3b; --warn:#fab219; --acc:#3987e5;
+}
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);
+ margin:0;padding:0 14px 48px;overflow-x:hidden;background:
+ radial-gradient(900px 420px at 50% -120px, rgba(57,135,229,.10), transparent 70%),
+ var(--bg)}
+header{position:sticky;top:0;z-index:9;display:flex;align-items:center;gap:12px;
+ max-width:1080px;margin:0 auto;padding:12px 2px;
+ background:linear-gradient(rgba(13,13,13,.94),rgba(13,13,13,.80));
+ backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+h1{font-size:1rem;margin:0;letter-spacing:.08em;font-weight:700}
+.mkt{font-size:.68rem;color:var(--ink2);border:1px solid var(--ring);
+ border-radius:6px;padding:2px 7px;letter-spacing:.12em;text-transform:uppercase}
+.live{display:flex;align-items:center;gap:6px;font-size:.7rem;
+ letter-spacing:.22em;color:var(--up)}
+.live.paused{color:var(--warn)}
+.dot{width:8px;height:8px;border-radius:50%;background:currentColor;
+ box-shadow:0 0 9px currentColor;animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.35}}
+.clock{margin-left:auto;color:var(--mut);font-size:.82rem;
+ font-variant-numeric:tabular-nums}
+.wrap{max-width:1080px;margin:0 auto;display:grid;gap:12px}
+.grid2{display:grid;gap:12px}
+@media(min-width:920px){.grid2{grid-template-columns:1fr 1fr;align-items:start}}
+.card{background:linear-gradient(180deg,#1d1d1c,#171716);
+ border:1px solid var(--ring);border-radius:14px;padding:14px 16px;min-width:0;
+ box-shadow:0 1px 0 rgba(255,255,255,.04) inset, 0 10px 24px rgba(0,0,0,.35)}
+.k{color:var(--mut);font-size:.7rem;text-transform:uppercase;
+ letter-spacing:.16em;margin-bottom:8px}
+.big{font-size:2.1rem;font-weight:700;font-variant-numeric:tabular-nums;
+ line-height:1.1;transition:color .5s}
+.big.fup{color:var(--up)} .big.fdown{color:var(--down)}
+.chip{display:inline-block;margin-left:10px;font-size:.85rem;font-weight:600;
+ border-radius:8px;padding:2px 9px;font-variant-numeric:tabular-nums;
+ vertical-align:4px;border:1px solid var(--ring)}
+.chip.pos{color:var(--up);background:rgba(12,163,12,.10)}
+.chip.neg{color:var(--down);background:rgba(208,59,59,.10)}
+.muted{color:var(--mut);font-size:.82rem}
+.pos{color:var(--up)} .neg{color:var(--down)}
+table{width:100%;border-collapse:collapse;font-size:.87rem;
+ font-variant-numeric:tabular-nums}
+td,th{padding:6px 6px;text-align:left;border-bottom:1px solid var(--grid)}
+th{color:var(--mut);font-weight:500;font-size:.7rem;text-transform:uppercase;
+ letter-spacing:.1em}
+tr:last-child td{border-bottom:none}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+@media(max-width:480px){
+ td,th{padding:5px 4px;font-size:.8rem}
+ .big{font-size:1.75rem}
+ .chip{font-size:.78rem;margin-left:6px}
+}
+.badge{display:inline-block;background:var(--tile);border:1px solid var(--ring);
+ border-radius:7px;padding:3px 9px;margin:2px;font-size:.82rem}
+.badge.ok{color:var(--up);border-color:rgba(12,163,12,.35)}
+.badge.wait{color:var(--warn);border-color:rgba(250,178,25,.35)}
+.tiles{display:grid;gap:10px;grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(min-width:560px){.tiles{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.tile{background:var(--tile);border:1px solid var(--ring);border-radius:11px;
+ padding:10px 12px;min-width:0}
+.tile .v{font-size:1.05rem;font-weight:700;font-variant-numeric:tabular-nums}
+.tile .k{margin:4px 0 0;font-size:.66rem}
+.bar{background:var(--axis);border-radius:6px;height:6px;overflow:hidden;margin-top:8px}
+.bar>div{background:var(--acc);height:100%;box-shadow:0 0 8px rgba(57,135,229,.5)}
+input{background:var(--tile);border:1px solid var(--ring);border-radius:9px;
+ padding:11px 12px;color:var(--ink);font-size:1rem;width:140px}
+button{border-radius:10px;padding:12px 18px;font-size:.95rem;font-weight:600;
+ margin:8px 8px 0 0;cursor:pointer;background:transparent}
+#pause{color:var(--warn);border:1px solid rgba(250,178,25,.5)}
+#pause:hover{background:rgba(250,178,25,.12)}
+#stop{color:var(--down);border:1px solid rgba(208,59,59,.55)}
+#stop:hover{background:rgba(208,59,59,.12)}
 </style></head><body>
-<h1>🤖 Multi-bot <span id="paused" class="muted"></span></h1>
+<header>
+ <h1>⚡ MULTI-BOT</h1><span class="mkt" id="mkt">—</span>
+ <span class="live" id="livebadge"><span class="dot"></span><span id="livetxt">LIVE</span></span>
+ <span class="clock" id="clock"></span>
+</header>
+<div class="wrap">
 
-<div class="card"><div class="muted">Totale waarde</div>
- <div class="big" id="equity">…</div>
+<div class="card"><div class="k">Totale waarde</div>
+ <span class="big" id="equity">…</span><span id="delta"></span>
  <div id="spark"></div>
- <div class="muted" id="meta"></div>
- <div id="brokers"></div></div>
+ <div class="muted" id="meta" style="margin-top:6px"></div>
+ <div id="brokers" style="margin-top:6px"></div></div>
 
-<div class="card"><div class="muted">Verdeling</div>
- <div class="grid" id="sleeves"></div></div>
+<div class="card"><div class="k">Verdeling</div>
+ <div class="tiles" id="sleeves"></div></div>
 
-<div class="card"><div class="muted">Open posities</div>
- <table id="positions"></table></div>
+<div class="grid2">
+ <div class="card"><div class="k">Open posities</div>
+  <div class="scroll"><table id="positions"></table></div></div>
+ <div class="card"><div class="k">Resultaten — afgeronde trades</div>
+  <div class="tiles" id="stats"></div>
+  <div class="k" style="margin-top:14px">Verloop gerealiseerde winst</div>
+  <div id="cum"></div></div>
+</div>
 
-<div class="card"><div class="muted">Resultaten (afgeronde trades)</div>
- <div class="grid" id="stats"></div>
- <div class="muted" style="margin-top:10px">Verloop gerealiseerde winst</div>
- <div id="cum"></div></div>
+<div class="grid2">
+ <div class="card"><div class="k">Dagresultaten</div>
+  <div id="dailybars"></div>
+  <div class="scroll"><table id="daily"></table></div></div>
+ <div class="card"><div class="k">Resultaat per instrument</div>
+  <div id="perinstr"></div></div>
+</div>
 
-<div class="card"><div class="muted">Dagresultaten</div>
- <div id="dailybars"></div>
- <table id="daily"></table></div>
+<div class="grid2">
+ <div class="card"><div class="k">Selecties</div>
+  <div class="muted">Crypto — zelf gekozen stijgers</div>
+  <div id="crypto" style="margin:4px 0 10px"></div>
+  <div class="muted">US-aandelen — zelf gescreend</div>
+  <div id="stocks" style="margin-top:4px"></div></div>
+ <div class="card"><div class="k">Laatste trades</div>
+  <div class="scroll"><table id="trades"></table></div></div>
+</div>
 
-<div class="card"><div class="muted">Resultaat per instrument</div>
- <div id="perinstr"></div></div>
-
-<div class="card"><div class="muted">Crypto-selectie (zelf gekozen stijgers)</div>
- <div id="crypto"></div>
- <div class="muted" style="margin-top:8px">US-aandelen (zelf gescreend)</div>
- <div id="stocks"></div></div>
-
-<div class="card"><div class="muted">Laatste trades</div>
- <table id="trades"></table></div>
-
-<div class="card"><div class="muted">Knoppen (toegangscode nodig)</div>
+<div class="card"><div class="k">Besturing — toegangscode nodig</div>
  <input id="code" placeholder="code" inputmode="text">
  <br><button id="pause" onclick="act('pause')">⏸ Pauze aan/uit</button>
- <button id="stop" onclick="act('close_all')">🛑 Noodstop</button>
- <div class="muted" id="msg"></div></div>
+ <button id="stop" onclick="act('close_all')">⏻ Noodstop</button>
+ <div class="muted" id="msg" style="margin-top:8px"></div></div>
 
+</div>
 <script>
+const UP="#0ca30c", DOWN="#d03b3b", GRID="#2c2c2a", MUT="#898781";
 const fmt = (v, d=2) => (v===null||v===undefined) ? "–" :
   Number(v).toLocaleString("nl-BE",{minimumFractionDigits:d,maximumFractionDigits:d});
-// prijzen: meer decimalen voor goedkope munten (0,2953 i.p.v. 0,30)
 const fmtP = (v) => {
   if(v===null||v===undefined) return "–";
   const a = Math.abs(Number(v));
@@ -106,8 +168,11 @@ const chips = (arr, c="") => arr.length
   ? arr.map(x=>`<span class="badge ${c}">${x}</span>`).join("")
   : "<span class=muted>geen</span>";
 
-// Broker-stijl grafiek: bedragen op de as, datums eronder, en een
-// aanwijzer (muis of vinger) die per punt datum + bedrag toont.
+setInterval(()=>{ document.getElementById("clock").textContent =
+  new Date().toLocaleTimeString("nl-BE"); }, 1000);
+
+// Broker-stijl grafiek: bedragen op de as, datums eronder, aanwijzer met
+// kruislijn en tooltip (muis of vinger).
 function renderChart(elId, points){
  const el = document.getElementById(elId);
  if(!el) return;
@@ -122,19 +187,19 @@ function renderChart(elId, points){
  let v0=Math.min(...vs), v1=Math.max(...vs);
  if(v1-v0 < 1e-9){ v0-=1; v1+=1; }
  const X=t=>L+(t-t0)/dt*iw, Y=v=>T+ih-(v-v0)/(v1-v0)*ih;
- const col = vs[vs.length-1] >= vs[0] ? "#4cd964" : "#ff453a";
+ const col = vs[vs.length-1] >= vs[0] ? UP : DOWN;
  let grid="";
  for(let i=0;i<=2;i++){
    const v=v0+(v1-v0)*i/2, y=Y(v);
-   grid+=`<line x1="${L}" y1="${y}" x2="${L+iw}" y2="${y}" stroke="#2c2c2e"/>`+
-         `<text x="${L+iw+6}" y="${y+4}" fill="#8e8e93" font-size="11">${fmt(v)}</text>`;
+   grid+=`<line x1="${L}" y1="${y}" x2="${L+iw}" y2="${y}" stroke="${GRID}"/>`+
+         `<text x="${L+iw+6}" y="${y+4}" fill="${MUT}" font-size="11">${fmt(v)}</text>`;
  }
  const span=t1-t0;
  const fx=t=>{const d=new Date(t*1000);
-   return span>172800 ? d.toLocaleDateString("nl-BE",{day:"2-digit",month:"2-digit"})
-                      : d.toLocaleTimeString("nl-BE",{hour:"2-digit",minute:"2-digit"});};
+   return span>86400 ? d.toLocaleDateString("nl-BE",{day:"2-digit",month:"2-digit"})
+                     : d.toLocaleTimeString("nl-BE",{hour:"2-digit",minute:"2-digit"});};
  [[t0,"start"],[(t0+t1)/2,"middle"],[t1,"end"]].forEach(([t,a])=>{
-   grid+=`<text x="${X(t).toFixed(1)}" y="${H-4}" fill="#8e8e93" font-size="11"`+
+   grid+=`<text x="${X(t).toFixed(1)}" y="${H-4}" fill="${MUT}" font-size="11"`+
          ` text-anchor="${a}">${fx(t)}</text>`;
  });
  const line=points.map(p=>`${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join(" ");
@@ -142,12 +207,14 @@ function renderChart(elId, points){
  el.innerHTML=
   `<svg id="${elId}_svg" viewBox="0 0 ${W} ${H}" style="width:100%;height:${H}px;`+
   `margin-top:6px;touch-action:pan-y">${grid}`+
-  `<polygon points="${L},${T+ih} ${line} ${(L+iw)},${T+ih}" fill="${col}" opacity="0.12"/>`+
-  `<polyline fill="none" stroke="${col}" stroke-width="2" points="${line}"/>`+
-  `<line id="${elId}_cx" y1="${T}" y2="${T+ih}" stroke="#8e8e93" stroke-dasharray="3,3" visibility="hidden"/>`+
+  `<polygon points="${L},${T+ih} ${line} ${(L+iw)},${T+ih}" fill="${col}" opacity="0.10"/>`+
+  `<polyline fill="none" stroke="${col}" stroke-width="2" points="${line}"`+
+  ` style="filter:drop-shadow(0 0 5px ${col}66)"/>`+
+  `<line id="${elId}_cx" y1="${T}" y2="${T+ih}" stroke="${MUT}" stroke-dasharray="3,3" visibility="hidden"/>`+
   `<circle id="${elId}_cp" r="4" fill="${col}" visibility="hidden"/></svg>`+
-  `<div id="${elId}_tip" style="position:absolute;top:0;left:8px;background:#2c2c2ef2;`+
-  `border-radius:6px;padding:3px 9px;font-size:.82rem;display:none;pointer-events:none"></div>`;
+  `<div id="${elId}_tip" style="position:absolute;top:0;left:8px;background:#232322f5;`+
+  `border:1px solid rgba(255,255,255,.12);border-radius:7px;padding:3px 9px;`+
+  `font-size:.82rem;display:none;pointer-events:none;font-variant-numeric:tabular-nums"></div>`;
  const svg=document.getElementById(elId+"_svg");
  const show=(ev)=>{
    const r=svg.getBoundingClientRect();
@@ -163,7 +230,7 @@ function renderChart(elId, points){
    tip.textContent=d.toLocaleDateString("nl-BE",{day:"2-digit",month:"2-digit"})+" "+
      d.toLocaleTimeString("nl-BE",{hour:"2-digit",minute:"2-digit"})+"  ·  € "+fmt(p[1]);
    tip.style.display="block";
-   tip.style.left=Math.min(Math.max(0,(x/W)*r.width-45), r.width-150)+"px";
+   tip.style.left=Math.min(Math.max(0,(x/W)*r.width-45), r.width-160)+"px";
  };
  svg.addEventListener("pointermove",show);
  svg.addEventListener("pointerdown",show);
@@ -182,18 +249,18 @@ function dailyBars(rows){
  const m=Math.max(...vals.map(Math.abs), 1e-9);
  const w=600, h=118, plotH=h-16, mid=plotH/2, slot=w/days.length;
  const bw=Math.max(6, Math.min(42, slot-6));
- let out=`<line x1="0" y1="${mid}" x2="${w}" y2="${mid}" stroke="#3a3a3c"/>`;
+ let out=`<line x1="0" y1="${mid}" x2="${w}" y2="${mid}" stroke="#383835"/>`;
  days.forEach((r,i)=>{
    const v=Number(r.pnl)||0;
    const bh=Math.max(1, Math.abs(v)/m*(mid-16));
    const x=i*slot+(slot-bw)/2, y=v>=0? mid-bh : mid;
    const label=Math.abs(v)>=10? fmt(v,0) : fmt(v,1);
    out+=`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}"`+
-        ` height="${bh.toFixed(1)}" rx="2" fill="${v>=0?"#4cd964":"#ff453a"}">`+
+        ` height="${bh.toFixed(1)}" rx="2" fill="${v>=0?UP:DOWN}">`+
         `<title>${r.date}: ${fmt(v)}</title></rect>`+
         `<text x="${(x+bw/2).toFixed(1)}" y="${(v>=0? y-4 : y+bh+11).toFixed(1)}"`+
-        ` fill="${v>=0?"#4cd964":"#ff453a"}" font-size="10" text-anchor="middle">${label}</text>`+
-        `<text x="${(x+bw/2).toFixed(1)}" y="${h-3}" fill="#8e8e93" font-size="10"`+
+        ` fill="${v>=0?UP:DOWN}" font-size="10" text-anchor="middle">${label}</text>`+
+        `<text x="${(x+bw/2).toFixed(1)}" y="${h-3}" fill="${MUT}" font-size="10"`+
         ` text-anchor="middle">${r.date.slice(8)}/${r.date.slice(5,7)}</text>`;
  });
  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;margin:6px 0">${out}</svg>`;
@@ -203,27 +270,46 @@ function hbars(list){
  if(!list||!list.length) return "<span class=muted>nog geen afgeronde trades</span>";
  const m=Math.max(...list.map(x=>Math.abs(x[1])), 1e-9);
  return list.map(([sym,v])=>
-   `<div style="display:flex;align-items:center;gap:8px;margin:5px 0">`+
+   `<div style="display:flex;align-items:center;gap:8px;margin:6px 0">`+
    `<div style="width:86px" class=muted>${sym}</div>`+
-   `<div style="flex:1"><div style="height:10px;border-radius:5px;`+
+   `<div style="flex:1"><div style="height:9px;border-radius:5px;`+
    `width:${(Math.abs(v)/m*100).toFixed(1)}%;min-width:2px;`+
-   `background:${v>=0?"#4cd964":"#ff453a"}"></div></div>`+
-   `<div class="${v>=0?"pos":"neg"}" style="width:76px;text-align:right">${fmt(v)}</div>`+
-   `</div>`).join("");
+   `background:${v>=0?UP:DOWN};box-shadow:0 0 7px ${v>=0?UP:DOWN}55"></div></div>`+
+   `<div class="${v>=0?"pos":"neg"}" style="width:76px;text-align:right;`+
+   `font-variant-numeric:tabular-nums">${fmt(v)}</div></div>`).join("");
 }
 
+let lastEquity=null;
 async function refresh(){
  try{
   const s = await (await fetch("api/state")).json();
-  document.getElementById("equity").textContent = "€ " + fmt(s.equity);
-  renderChart("spark", s.equity_history);
-  document.getElementById("paused").textContent = s.paused ? "⏸ gepauzeerd" : "";
+  const eq=document.getElementById("equity");
+  eq.textContent = "€ " + fmt(s.equity);
+  if(lastEquity!==null && s.equity!==null && s.equity!==lastEquity){
+    eq.classList.remove("fup","fdown"); void eq.offsetWidth;
+    eq.classList.add(s.equity>lastEquity?"fup":"fdown");
+  }
+  if(s.equity!==null) lastEquity=s.equity;
+
+  const hist=s.equity_history||[];
+  const delta=document.getElementById("delta");
+  if(hist.length>1 && s.equity!==null){
+    const d=s.equity-hist[0][1], p=hist[0][1]? d/hist[0][1]*100 : 0;
+    delta.innerHTML=`<span class="chip ${d>=0?"pos":"neg"}">${d>=0?"▲":"▼"} `+
+      `${fmt(Math.abs(d))} (${fmt(Math.abs(p),2)}%)</span>`;
+  } else delta.innerHTML="";
+  renderChart("spark", hist);
+
+  document.getElementById("mkt").textContent = (s.market||"—").toUpperCase();
+  const lb=document.getElementById("livebadge");
+  lb.classList.toggle("paused", !!s.paused);
+  document.getElementById("livetxt").textContent = s.paused ? "GEPAUZEERD" : "LIVE";
   document.getElementById("meta").textContent =
-    s.market + " · " + (s.note ? s.note + " · " : "") +
+    (s.note ? s.note + " · " : "") +
     "bijgewerkt " + new Date(s.ts*1000).toLocaleTimeString("nl-BE");
   document.getElementById("brokers").innerHTML = (s.brokers||[]).map(b =>
     `<span class="badge ${b.connected?"ok":"wait"}">`+
-    `${b.connected?"✅":"⏳"} ${b.name}</span>`).join("");
+    `${b.connected?"●":"◌"} ${b.name}</span>`).join("");
 
   const sl = s.sleeves || {};
   const used = (sl.crypto?.used ?? 0) + (sl.stocks?.used ?? 0);
@@ -238,16 +324,16 @@ async function refresh(){
   };
   document.getElementById("sleeves").innerHTML =
     sleeveTile("🪙","In crypto", sl.crypto) +
-    sleeveTile("📈","In aandelen/ETF's", sl.stocks) +
+    sleeveTile("📈","In aandelen / ETF's", sl.stocks) +
     `<div class=tile><div class=v>€ ${fmt(free)}</div><div class=k>💶 Vrij</div></div>`;
 
   let rows = "<tr><th>Instrument</th><th>Kant</th><th>Instap</th><th>Nu</th>"+
              "<th>Stop</th><th>Resultaat</th></tr>";
-  if(!s.positions.length) rows += "<tr><td colspan=6 class=muted>geen</td></tr>";
+  if(!s.positions.length) rows += "<tr><td colspan=6 class=muted>geen open posities</td></tr>";
   for(const p of s.positions){
     const pct = (p.last_price && p.entry)
       ? ((p.direction==="long"?1:-1)*(p.last_price/p.entry-1)*100) : null;
-    rows += `<tr><td>${p.symbol}<div class=muted>${p.strategy||""}</div></td>`+
+    rows += `<tr><td>${p.symbol}<div class=muted style="font-size:.72rem">${p.strategy||""}</div></td>`+
       `<td>${p.direction}</td><td>${fmtP(p.entry)}</td><td>${fmtP(p.last_price)}</td>`+
       `<td>${fmtP(p.stop)}</td><td class="${cls(p.upnl??0)}">${fmt(p.upnl)}`+
       `${pct===null?"":` <span class=muted>(${pct>=0?"+":""}${fmt(pct,1)}%)</span>`}</td></tr>`;
@@ -294,7 +380,7 @@ async function act(action){
  document.getElementById("msg").textContent = (await r.json()).message;
  refresh();
 }
-refresh(); setInterval(refresh, 10000);
+refresh(); setInterval(refresh, 5000);
 </script></body></html>"""
 
 
