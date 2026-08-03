@@ -115,17 +115,22 @@ class IBKRBroker(Broker):
         # (IBIS vs IBIS2 vs FWB): probeer een zoekvolgorde en gebruik wat werkt.
         attempts: list[tuple[str, str | None]] = [(base_exchange, primary)]
         if base_exchange != "SMART":
-            attempts.append(("SMART", primary or base_exchange))
-        if "IBIS" in (base_exchange, primary or ""):
-            attempts += [("IBIS2", None), ("FWB", None)]
+            attempts.append(("SMART", None))
+        if {base_exchange, primary or ""} & {"IBIS", "IBIS2"}:
+            for exchange in ("IBIS2", "IBIS", "FWB"):
+                if exchange != base_exchange:
+                    attempts.append((exchange, None))
         tried = []
         for exchange, primary_exchange in attempts:
             kwargs = {"primaryExchange": primary_exchange} if primary_exchange else {}
             contract = self._lib.Stock(symbol, exchange, currency, **kwargs)
             try:
-                qualified = self.ib.qualifyContracts(contract)
+                result = self.ib.qualifyContracts(contract)
             except Exception:
-                qualified = []
+                result = []
+            # ib_async geeft None-plaatshouders terug voor onbekende
+            # contracten — die tellen niet als "gevonden"!
+            qualified = [c for c in (result or []) if c is not None]
             if qualified:
                 if exchange != base_exchange:
                     log.info("%s gevonden via %s (i.p.v. %s)",
