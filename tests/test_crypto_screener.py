@@ -98,7 +98,7 @@ class CryptoScreeningIntegrationTests(unittest.TestCase):
         self.assertIn("BTC/EUR", universe)          # positie -> blijft
         self.assertIn("SOL/EUR", universe)
         self.assertEqual(len(universe), 3)
-        self.assertIn("SOL/EUR", bot._momentum().symbols)
+        self.assertIn("SOL/EUR", bot.crypto_strategy.symbols)
         self.assertEqual(broker.pairs["SOL/EUR"], "SOLEUR")
         # zelfde 12 uur: scanner wordt niet opnieuw aangeroepen
         main_module.crypto_screener.scan_kraken = (
@@ -119,8 +119,8 @@ class CryptoScreeningIntegrationTests(unittest.TestCase):
         # die alweer teruggezet zijn; daarom herstellen we hier handmatig:
         bot2.portfolio.meta["crypto_universe"] = ["SOL/EUR", "DOGE/EUR"]
         bot2._restore_crypto()
-        self.assertIn("SOL/EUR", bot2._momentum().symbols)
-        self.assertIn("DOGE/EUR", bot2._momentum().symbols)
+        self.assertIn("SOL/EUR", bot2.crypto_strategy.symbols)
+        self.assertIn("DOGE/EUR", bot2.crypto_strategy.symbols)
         self.assertEqual(broker.pairs["DOGE/EUR"], "XDGEUR")
 
 

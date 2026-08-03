@@ -140,6 +140,8 @@ button{border-radius:10px;padding:12px 18px;font-size:.95rem;font-weight:600;
  <div class="card"><div class="k">Selecties</div>
   <div class="muted">Crypto — zelf gekozen stijgers</div>
   <div id="crypto" style="margin:4px 0 10px"></div>
+  <div class="muted">Crypto-strategie — winnaar van het strategie-lab</div>
+  <div id="cstrat" style="margin:4px 0 10px"></div>
   <div class="muted">Aandelen wereldwijd — zelf gescreend</div>
   <div id="stocks" style="margin-top:4px"></div></div>
  <div class="card"><div class="k">Laatste trades</div>
@@ -362,6 +364,8 @@ async function refresh(){
   document.getElementById("daily").innerHTML = d;
 
   document.getElementById("crypto").innerHTML = chips(s.crypto_universe||[]);
+  document.getElementById("cstrat").innerHTML =
+    s.crypto_strategy ? chips([s.crypto_strategy]) : "<span class=muted>—</span>";
   document.getElementById("stocks").innerHTML = chips(s.universe||[]);
 
   let t = "<tr><th>Tijd</th><th>Instrument</th><th>Kant</th><th>Resultaat</th></tr>";
