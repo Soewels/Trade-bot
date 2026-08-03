@@ -20,7 +20,7 @@ Run from the project root:  python -m bot.main
 import logging
 import sys
 import time
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -224,26 +224,19 @@ class Bot:
         self.portfolio.save()
         log.info("crypto universe: %s", ", ".join(universe) or "leeg")
 
-    def _retry_stock_scan_tomorrow(self, meta: dict, today) -> None:
-        """Zet de scan-teller zo dat morgen opnieuw wordt geprobeerd
-        (i.p.v. pas over US_STOCK_RESCAN_DAYS dagen)."""
-        from datetime import timedelta
-        retry = today - timedelta(days=max(config.US_STOCK_RESCAN_DAYS - 1, 0))
-        meta["us_stocks_screened"] = retry.isoformat()
-        self.portfolio.save()
-
     def maybe_screen_us_stocks(self) -> None:
-        """(Re)screen for liquid US stocks when the universe is stale."""
+        """(Re)screen for liquid stocks when the universe is stale."""
         broker = self._ibkr_broker()
         if (config.US_STOCK_COUNT <= 0 or broker is None
                 or broker not in self.connected_brokers):
             return
         meta = self.portfolio.meta
-        last = meta.get("us_stocks_screened")
-        today = datetime.now(ZoneInfo(config.TIMEZONE)).date()
-        if last and (today - date.fromisoformat(last)).days < config.US_STOCK_RESCAN_DAYS:
+        if time.time() < float(meta.get("us_stocks_next_scan", 0)):
             return
-        meta["us_stocks_screened"] = today.isoformat()  # also on failure: no retry storm
+        # voorlopig: normale interval; bij lege/mislukte scan wordt dit
+        # hieronder 4 uur, zodat een poging vanzelf in beursuren valt
+        meta["us_stocks_next_scan"] = (time.time()
+                                       + config.US_STOCK_RESCAN_DAYS * 86400)
         self.portfolio.save()
         locations = [loc for region in config.STOCK_REGIONS
                      for loc in config.REGION_LOCATIONS[region]]
@@ -253,14 +246,15 @@ class Bot:
                 config.US_STOCK_MIN_MARKET_CAP_MUSD,
                 config.US_STOCK_MIN_DOLLAR_VOLUME, locations)
         except Exception as exc:
-            self._retry_stock_scan_tomorrow(meta, today)
-            log.warning("stock screening failed (nieuwe poging morgen): %s", exc)
+            meta["us_stocks_next_scan"] = time.time() + 4 * 3600
+            self.portfolio.save()
+            log.warning("stock screening failed (nieuwe poging over 4 uur): %s", exc)
             return
         if not picks:
-            # weekend/feestdag: scanner geeft niets — morgen opnieuw proberen
-            self._retry_stock_scan_tomorrow(meta, today)
-            log.info("stock scan leverde niets op (beurs dicht?); "
-                     "nieuwe poging morgen")
+            meta["us_stocks_next_scan"] = time.time() + 4 * 3600
+            self.portfolio.save()
+            log.info("stock scan leverde niets op (beurs dicht of geen "
+                     "datarechten); nieuwe poging over 4 uur")
             return
         current = list(meta.get("us_stocks", []))
         held = {sym for sym in current if sym in self.portfolio.positions}
