@@ -185,10 +185,12 @@ MARKETS = {
     "eu": {
         "timezone": "Europe/Amsterdam",   # daily P&L calendar
         "instruments": {
-            "SXR8": {"broker": "ibkr", "exchange": "IBIS", "currency": "EUR"},
-            "SXRV": {"broker": "ibkr", "exchange": "IBIS", "currency": "EUR"},
+            # ETF's/ETC's noteren op Xetra's ETF-segment IBIS2 (bevestigd via
+            # de IBKR-API); Xetra-Gold (4GLD) staat op IBIS.
+            "SXR8": {"broker": "ibkr", "exchange": "IBIS2", "currency": "EUR"},
+            "SXRV": {"broker": "ibkr", "exchange": "IBIS2", "currency": "EUR"},
             "4GLD": {"broker": "ibkr", "exchange": "IBIS", "currency": "EUR"},
-            "OD7F": {"broker": "ibkr", "exchange": "IBIS", "currency": "EUR"},
+            "OD7F": {"broker": "ibkr", "exchange": "IBIS2", "currency": "EUR"},
             **{sym: {"broker": "kraken", "pair": kraken_pair(sym)}
                for sym in CRYPTO_SYMBOLS},
         },
