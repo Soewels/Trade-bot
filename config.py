@@ -94,7 +94,9 @@ US_STOCK_THRESHOLD = 2.0            # entry threshold in std devs (wider: single
 US_STOCK_MIN_PRICE = 10.0           # skip penny-ish stocks
 US_STOCK_MIN_MARKET_CAP_MUSD = 10_000.0   # >= $10 billion market cap
 US_STOCK_MIN_DOLLAR_VOLUME = 50e6   # >= $50M average daily dollar volume
-US_STOCK_RESCAN_DAYS = 7            # refresh the universe weekly
+US_STOCK_RESCAN_DAYS = float(os.environ.get("US_STOCK_RESCAN_DAYS", "7"))
+# na een lege/mislukte scan: zoveel uur later opnieuw proberen
+US_STOCK_RETRY_HOURS = float(os.environ.get("US_STOCK_RETRY_HOURS", "1"))
 
 # --- Telegram ----------------------------------------------------------------------
 # Prefix voor alle meldingen van deze bot, zodat je ze in dezelfde chat kunt

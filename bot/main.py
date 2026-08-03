@@ -246,15 +246,16 @@ class Bot:
                 config.US_STOCK_MIN_MARKET_CAP_MUSD,
                 config.US_STOCK_MIN_DOLLAR_VOLUME, locations)
         except Exception as exc:
-            meta["us_stocks_next_scan"] = time.time() + 4 * 3600
+            meta["us_stocks_next_scan"] = time.time() + config.US_STOCK_RETRY_HOURS * 3600
             self.portfolio.save()
-            log.warning("stock screening failed (nieuwe poging over 4 uur): %s", exc)
+            log.warning("stock screening failed (nieuwe poging over %.0f uur): %s", config.US_STOCK_RETRY_HOURS, exc)
             return
         if not picks:
-            meta["us_stocks_next_scan"] = time.time() + 4 * 3600
+            meta["us_stocks_next_scan"] = time.time() + config.US_STOCK_RETRY_HOURS * 3600
             self.portfolio.save()
             log.info("stock scan leverde niets op (beurs dicht of geen "
-                     "datarechten); nieuwe poging over 4 uur")
+                     "datarechten); nieuwe poging over %.0f uur",
+                     config.US_STOCK_RETRY_HOURS)
             return
         current = list(meta.get("us_stocks", []))
         held = {sym for sym in current if sym in self.portfolio.positions}
