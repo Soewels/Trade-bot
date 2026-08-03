@@ -224,6 +224,14 @@ class Bot:
         self.portfolio.save()
         log.info("crypto universe: %s", ", ".join(universe) or "leeg")
 
+    def _retry_stock_scan_tomorrow(self, meta: dict, today) -> None:
+        """Zet de scan-teller zo dat morgen opnieuw wordt geprobeerd
+        (i.p.v. pas over US_STOCK_RESCAN_DAYS dagen)."""
+        from datetime import timedelta
+        retry = today - timedelta(days=max(config.US_STOCK_RESCAN_DAYS - 1, 0))
+        meta["us_stocks_screened"] = retry.isoformat()
+        self.portfolio.save()
+
     def maybe_screen_us_stocks(self) -> None:
         """(Re)screen for liquid US stocks when the universe is stale."""
         broker = self._ibkr_broker()
@@ -245,8 +253,14 @@ class Bot:
                 config.US_STOCK_MIN_MARKET_CAP_MUSD,
                 config.US_STOCK_MIN_DOLLAR_VOLUME, locations)
         except Exception as exc:
-            log.warning("stock screening failed (retry in %d days): %s",
-                        config.US_STOCK_RESCAN_DAYS, exc)
+            self._retry_stock_scan_tomorrow(meta, today)
+            log.warning("stock screening failed (nieuwe poging morgen): %s", exc)
+            return
+        if not picks:
+            # weekend/feestdag: scanner geeft niets — morgen opnieuw proberen
+            self._retry_stock_scan_tomorrow(meta, today)
+            log.info("stock scan leverde niets op (beurs dicht?); "
+                     "nieuwe poging morgen")
             return
         current = list(meta.get("us_stocks", []))
         held = {sym for sym in current if sym in self.portfolio.positions}
