@@ -3,9 +3,10 @@
 Runs three strategies on five instruments, on the market chosen with
 BOT_MARKET in .env:
 
-  eu (default): mean reversion on SXR8 & SXRV, breakout on BTC/EUR,
-                trend following on 4GLD & OD7F — UCITS ETFs/ETCs in EUR
-                via Interactive Brokers, BTC/EUR via Kraken.
+  eu (default): mean reversion on VUSA & CNDX, breakout on the
+                self-screened crypto universe, trend following on SGLD &
+                CRUD — UCITS ETFs/ETCs via Interactive Brokers (Amsterdam
+                en Londen: gratis vertraagde data), crypto via Kraken.
   us:           the same strategies on SPY, QQQ, BTC/USD, GLD and USO
                 via Alpaca.
 

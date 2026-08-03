@@ -26,11 +26,12 @@ class ConfigProfileTests(unittest.TestCase):
             self.assertIn(sym, market["instruments"])
         for sym in market["correlation_blocked_symbols"]:
             self.assertIn(sym, market["instruments"])
-        # EU instruments must be EUR-denominated and not on Alpaca
+        # EU instruments: not on Alpaca; EUR of USD (USD wordt live naar EUR
+        # omgerekend), nooit GBP (pence-notering verstoort de sizing 100x)
         for sym, meta in market["instruments"].items():
             self.assertNotEqual(meta["broker"], "alpaca")
             if meta["broker"] == "ibkr":
-                self.assertEqual(meta["currency"], "EUR")
+                self.assertIn(meta["currency"], ("EUR", "USD"))
 
     def test_us_profile_is_consistent(self):
         market = config.MARKETS["us"]
