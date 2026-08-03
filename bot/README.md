@@ -6,14 +6,18 @@ with two market profiles, selected via `BOT_MARKET` in `.env`:
 
 | | `eu` (default) | `us` |
 |---|---|---|
-| S&P 500 | **SXR8** — iShares Core S&P 500 UCITS (Xetra, EUR) | SPY |
-| Nasdaq 100 | **SXRV** — iShares Nasdaq 100 UCITS (Xetra, EUR) | QQQ |
-| Bitcoin | **BTC/EUR** via Kraken | BTC/USD via Alpaca |
-| Gold | **4GLD** — Xetra-Gold ETC (EUR) | GLD |
-| Oil | **OD7F** — WisdomTree WTI Crude Oil (Xetra, EUR) | USO |
+| S&P 500 | **VUSA** — Vanguard S&P 500 UCITS (Amsterdam, EUR) | SPY |
+| Nasdaq 100 | **CNDX** — iShares Nasdaq 100 UCITS (London, USD) | QQQ |
+| Crypto | self-screened risers via Kraken (EUR) | BTC/USD via Alpaca |
+| Gold | **SGLD** — Invesco Physical Gold (London, USD) | GLD |
+| Oil | **CRUD** — WisdomTree WTI Crude Oil (London, USD) | USO |
 | Broker | Interactive Brokers + Kraken | Alpaca |
-| Currency | EUR | USD |
+| Base currency | EUR (USD listings FX-converted live) | USD |
 | P&L calendar | Europe/Amsterdam | America/New_York |
+
+The EU listings were chosen empirically with `deploy/ibkr_datatest.py`:
+Euronext Amsterdam and the LSE serve **free delayed data** through IBKR,
+while Xetra and Euronext Paris require a paid data subscription.
 
 The **EU profile is PRIIPs-proof**: it uses UCITS ETFs/ETCs that European
 retail investors are actually allowed to buy, on European exchanges, in

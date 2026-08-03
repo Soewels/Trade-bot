@@ -187,20 +187,22 @@ MARKETS = {
     "eu": {
         "timezone": "Europe/Amsterdam",   # daily P&L calendar
         "instruments": {
-            # ETF's/ETC's noteren op Xetra's ETF-segment IBIS2 (bevestigd via
-            # de IBKR-API); Xetra-Gold (4GLD) staat op IBIS.
-            "SXR8": {"broker": "ibkr", "exchange": "IBIS2", "currency": "EUR"},
-            "SXRV": {"broker": "ibkr", "exchange": "IBIS2", "currency": "EUR"},
-            "4GLD": {"broker": "ibkr", "exchange": "IBIS", "currency": "EUR"},
-            "OD7F": {"broker": "ibkr", "exchange": "IBIS2", "currency": "EUR"},
+            # Gekozen op basis van deploy/ibkr_datatest.py: Amsterdam (AEB) en
+            # Londen (LSEETF/LSE) leveren gratis vertraagde data; Xetra en
+            # Parijs vereisen een data-abonnement. USD-noteringen worden door
+            # de bot live naar EUR omgerekend voor de sizing.
+            "VUSA": {"broker": "ibkr", "exchange": "AEB", "currency": "EUR"},
+            "CNDX": {"broker": "ibkr", "exchange": "LSEETF", "currency": "USD"},
+            "SGLD": {"broker": "ibkr", "exchange": "LSEETF", "currency": "USD"},
+            "CRUD": {"broker": "ibkr", "exchange": "LSE", "currency": "USD"},
             **{sym: {"broker": "kraken", "pair": kraken_pair(sym)}
                for sym in CRYPTO_SYMBOLS},
         },
-        "mean_reversion_symbols": {"SXR8": 1.5, "SXRV": 1.8},
+        "mean_reversion_symbols": {"VUSA": 1.5, "CNDX": 1.8},
         "momentum_symbols": list(CRYPTO_SYMBOLS),
-        "trend_symbols": ["4GLD", "OD7F"],
+        "trend_symbols": ["SGLD", "CRUD"],
         # if both are long, no new crypto longs (correlation filter)
-        "risk_on_pair": ("SXR8", "SXRV"),
+        "risk_on_pair": ("VUSA", "CNDX"),
         "correlation_blocked_symbols": set(CRYPTO_SYMBOLS),
     },
     "us": {
