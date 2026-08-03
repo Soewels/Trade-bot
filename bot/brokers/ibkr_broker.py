@@ -105,20 +105,37 @@ class IBKRBroker(Broker):
                  self.host, self.port, self.client_id)
 
     def _contract(self, symbol: str):
-        if symbol not in self._contracts:
-            meta = self.instruments[symbol]
-            kwargs = {}
-            if meta.get("primaryExchange"):
-                kwargs["primaryExchange"] = meta["primaryExchange"]
-            contract = self._lib.Stock(symbol, meta.get("exchange", "SMART"),
-                                       meta.get("currency", "EUR"), **kwargs)
-            qualified = self.ib.qualifyContracts(contract)
-            if not qualified:
-                raise BrokerError(
-                    f"IBKR does not recognise {symbol} on "
-                    f"{meta.get('exchange')}: check the ticker/exchange in config.py")
-            self._contracts[symbol] = qualified[0]
-        return self._contracts[symbol]
+        if symbol in self._contracts:
+            return self._contracts[symbol]
+        meta = self.instruments[symbol]
+        currency = meta.get("currency", "EUR")
+        base_exchange = meta.get("exchange", "SMART")
+        primary = meta.get("primaryExchange")
+        # Noteringen zitten bij IBKR soms net op een andere beurscode
+        # (IBIS vs IBIS2 vs FWB): probeer een zoekvolgorde en gebruik wat werkt.
+        attempts: list[tuple[str, str | None]] = [(base_exchange, primary)]
+        if base_exchange != "SMART":
+            attempts.append(("SMART", primary or base_exchange))
+        if "IBIS" in (base_exchange, primary or ""):
+            attempts += [("IBIS2", None), ("FWB", None)]
+        tried = []
+        for exchange, primary_exchange in attempts:
+            kwargs = {"primaryExchange": primary_exchange} if primary_exchange else {}
+            contract = self._lib.Stock(symbol, exchange, currency, **kwargs)
+            try:
+                qualified = self.ib.qualifyContracts(contract)
+            except Exception:
+                qualified = []
+            if qualified:
+                if exchange != base_exchange:
+                    log.info("%s gevonden via %s (i.p.v. %s)",
+                             symbol, exchange, base_exchange)
+                self._contracts[symbol] = qualified[0]
+                return qualified[0]
+            tried.append(exchange)
+        raise BrokerError(
+            f"IBKR does not recognise {symbol} (geprobeerd: {', '.join(tried)}): "
+            "check the ticker/exchange in config.py")
 
     def add_instrument(self, symbol: str, meta: dict) -> None:
         """Register a (screened) instrument at runtime."""
