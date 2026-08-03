@@ -28,7 +28,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import config
-from bot import crypto_screener, screener
+from bot import crypto_screener, screener, strategy_lab
 from bot.brokers import BrokerError, build_brokers
 from bot.indicators import atr_last
 from bot.models import Bar, Signal
@@ -105,6 +105,11 @@ class Bot:
         self.connected_brokers: set = set()
         self._next_connect_try = 0.0
         self._connect_delay = 15.0
+        # de actieve crypto-strategie ("kampioen"); het strategie-lab kan
+        # deze later vervangen door een beter geteste uitdager
+        self.crypto_strategy = next(
+            s for s in self.strategies if s.name == "momentum_breakout")
+        self._restore_crypto_strategy()
         self._restore_us_stocks()
         self._restore_crypto()
 
@@ -163,21 +168,17 @@ class Bot:
         return next((b for b in set(self.brokers.values()) if b.name == "kraken"),
                     None)
 
-    def _momentum(self):
-        return next(s for s in self.strategies if s.name == "momentum_breakout")
-
     def _crypto_symbols(self) -> list[str]:
         broker = self._kraken_broker()
-        return [s for s in self._momentum().symbols
+        return [s for s in self.crypto_strategy.symbols
                 if self.brokers.get(s) is broker]
 
     def _register_crypto(self, symbol: str) -> None:
         broker = self._kraken_broker()
         broker.add_pair(symbol, config.kraken_pair(symbol))
         self.brokers[symbol] = broker
-        momentum = self._momentum()
-        if symbol not in momentum.symbols:
-            momentum.symbols.append(symbol)
+        if symbol not in self.crypto_strategy.symbols:
+            self.crypto_strategy.symbols.append(symbol)
 
     def _restore_crypto(self) -> None:
         if self._kraken_broker() is None:
@@ -206,14 +207,13 @@ class Bot:
             log.warning("crypto-scan mislukt (nieuwe poging over %.0f uur): %s",
                         config.CRYPTO_RESCAN_HOURS, exc)
             return
-        momentum = self._momentum()
         current = self._crypto_symbols()
         held = {s for s in current if s in self.portfolio.positions}
         universe = screener.merge_universe(current, held, picks,
                                            config.CRYPTO_AUTO_COUNT)
         for symbol in current:
             if symbol not in universe:
-                momentum.symbols.remove(symbol)
+                self.crypto_strategy.symbols.remove(symbol)
                 self.brokers.pop(symbol, None)
         for symbol in universe:
             if symbol not in current:
@@ -224,6 +224,75 @@ class Bot:
         meta["crypto_universe"] = universe
         self.portfolio.save()
         log.info("crypto universe: %s", ", ".join(universe) or "leeg")
+
+    # --- strategie-lab --------------------------------------------------------------
+
+    def _restore_crypto_strategy(self) -> None:
+        """Zet na een herstart de eerder gekozen kampioen weer actief."""
+        name = self.portfolio.meta.get("crypto_strategy")
+        if (name and name != self.crypto_strategy.name
+                and name in strategy_lab.CANDIDATES):
+            self._switch_crypto_strategy(name)
+
+    def _switch_crypto_strategy(self, name: str) -> None:
+        old = self.crypto_strategy
+        new = strategy_lab.build_candidate(name, old.symbols,
+                                           config.CRYPTO_TIMEFRAME_MINUTES)
+        self.strategies[self.strategies.index(old)] = new
+        self.crypto_strategy = new
+        self.portfolio.meta["crypto_strategy"] = name
+        log.info("actieve crypto-strategie: %s", name)
+
+    def maybe_run_strategy_lab(self) -> None:
+        """Backtest periodiek alle kandidaten en wissel alleen naar een
+        uitdager die de kampioen consistent en ruim verslaat."""
+        broker = self._kraken_broker()
+        if (config.STRATEGY_LAB_HOURS <= 0 or broker is None
+                or broker not in self.connected_brokers):
+            return
+        symbols = self._crypto_symbols()
+        if not symbols:
+            return
+        meta = self.portfolio.meta
+        last = float(meta.get("strategy_lab_ts", 0))
+        if time.time() - last < config.STRATEGY_LAB_HOURS * 3600:
+            return
+        meta["strategy_lab_ts"] = time.time()  # ook bij falen: geen retry-storm
+        self.portfolio.save()
+        bars_by_symbol: dict[str, list[Bar]] = {}
+        for symbol in symbols:
+            try:
+                bars_by_symbol[symbol] = broker.fetch_bars(
+                    symbol, config.CRYPTO_TIMEFRAME_MINUTES,
+                    config.STRATEGY_LAB_BARS)
+            except Exception as exc:
+                log.warning("strategie-lab: geen historie voor %s: %s",
+                            symbol, exc)
+        results = strategy_lab.run_tournament(bars_by_symbol,
+                                              config.CRYPTO_TIMEFRAME_MINUTES)
+        if not results:
+            log.info("strategie-lab: te weinig historie, volgende ronde over "
+                     "%.0f uur", config.STRATEGY_LAB_HOURS)
+            return
+        champion = self.crypto_strategy.name
+        winner = strategy_lab.choose(champion, results,
+                                     config.STRATEGY_LAB_MIN_IMPROVEMENT,
+                                     config.STRATEGY_LAB_MIN_TRADES)
+        meta["strategy_lab_results"] = {
+            name: round(res["score"], 4) for name, res in results.items()}
+        scores = ", ".join(f"{name}={res['score']:+.4f}"
+                           for name, res in sorted(results.items(),
+                                                   key=lambda kv: -kv[1]["score"]))
+        log.info("strategie-lab: %s (kampioen: %s)", scores, champion)
+        if winner != champion:
+            self._switch_crypto_strategy(winner)
+            self.portfolio.notify(
+                f"🧪 Strategie-lab: {strategy_lab.LABELS_NL.get(winner, winner)} "
+                f"verslaat {strategy_lab.LABELS_NL.get(champion, champion)} in "
+                f"beide testhelften ({results[winner]['score']:+.2%} vs "
+                f"{results[champion]['score']:+.2%}) — vanaf nu de actieve "
+                "crypto-strategie")
+        self.portfolio.save()
 
     def maybe_screen_us_stocks(self) -> None:
         """(Re)screen for liquid stocks when the universe is stale."""
@@ -513,6 +582,10 @@ class Bot:
                        "universe": self.portfolio.meta.get("us_stocks", []),
                        "crypto_universe": self.portfolio.meta.get(
                            "crypto_universe", self._crypto_symbols()),
+                       "crypto_strategy": strategy_lab.LABELS_NL.get(
+                           self.crypto_strategy.name, self.crypto_strategy.name),
+                       "lab_results": self.portfolio.meta.get(
+                           "strategy_lab_results", {}),
                        "brokers": brokers,
                        "sleeves": sleeves,
                        "equity_history": history,
@@ -563,6 +636,7 @@ class Bot:
                 self.try_connect_brokers()
                 self.process_close_all()
                 self.maybe_screen_crypto()
+                self.maybe_run_strategy_lab()
                 self.maybe_screen_us_stocks()
                 self.roll_daily_pnl()
                 self.check_stops()

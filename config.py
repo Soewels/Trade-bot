@@ -175,6 +175,18 @@ CRYPTO_AUTO_COUNT = int(os.environ.get("CRYPTO_AUTO_COUNT", "5"))
 CRYPTO_MIN_EUR_VOLUME = float(os.environ.get("CRYPTO_MIN_EUR_VOLUME", "2000000"))
 CRYPTO_RESCAN_HOURS = float(os.environ.get("CRYPTO_RESCAN_HOURS", "12"))
 
+# --- strategie-lab -----------------------------------------------------------------
+# Elke STRATEGY_LAB_HOURS backtest de bot alle kandidaat-strategieën op de
+# recente candles van de eigen crypto-selectie (0 = lab uit). Een uitdager
+# vervangt de actieve strategie alleen als hij in beide helften van de
+# historie wint én in totaal minstens STRATEGY_LAB_MIN_IMPROVEMENT (fractie,
+# 0.25 = 25%) beter scoort — anders blijft de zittende kampioen staan.
+STRATEGY_LAB_HOURS = float(os.environ.get("STRATEGY_LAB_HOURS", "24"))
+STRATEGY_LAB_MIN_IMPROVEMENT = float(
+    os.environ.get("STRATEGY_LAB_MIN_IMPROVEMENT", "0.25"))
+STRATEGY_LAB_BARS = 720            # Kraken geeft maximaal ~720 candles historie
+STRATEGY_LAB_MIN_TRADES = 4        # minder trades bewijst niets
+
 # --- market profiles ------------------------------------------------------------------
 # Instrument notes for "eu" (all EUR, Xetra = IBKR exchange code IBIS):
 #   SXR8 = iShares Core S&P 500 UCITS ETF (SPY equivalent)

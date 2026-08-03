@@ -52,20 +52,20 @@ class SleeveBudgetTests(unittest.TestCase):
 
     def test_entry_is_capped_by_remaining_budget(self):
         config.CRYPTO_BUDGET = 15.0  # 10 in gebruik -> 5 EUR ruimte
-        self.bot.execute(self.bot._momentum(), "ETH/EUR",
+        self.bot.execute(self.bot.crypto_strategy, "ETH/EUR",
                          Signal("long", "test"), bars_with_atr())
         state = self.bot.portfolio.positions["ETH/EUR"]
         self.assertAlmostEqual(state.qty, 0.05)  # 5 EUR / prijs 100
 
     def test_entry_is_skipped_when_budget_is_full(self):
         config.CRYPTO_BUDGET = 8.0   # al 10 in gebruik -> vol
-        self.bot.execute(self.bot._momentum(), "SOL/EUR",
+        self.bot.execute(self.bot.crypto_strategy, "SOL/EUR",
                          Signal("long", "test"), bars_with_atr())
         self.assertNotIn("SOL/EUR", self.bot.portfolio.positions)
 
     def test_no_budget_means_no_cap(self):
         config.CRYPTO_BUDGET = 0.0
-        self.bot.execute(self.bot._momentum(), "ETH/EUR",
+        self.bot.execute(self.bot.crypto_strategy, "ETH/EUR",
                          Signal("long", "test"), bars_with_atr())
         state = self.bot.portfolio.positions["ETH/EUR"]
         self.assertGreater(state.qty, 0.05)
@@ -74,18 +74,18 @@ class SleeveBudgetTests(unittest.TestCase):
         # ruim budget, maar max 20 EUR per positie -> 0.2 stuks @ 100
         config.CRYPTO_BUDGET = 1000.0
         config.CRYPTO_MAX_PER_POSITION = 20.0
-        self.bot.execute(self.bot._momentum(), "ETH/EUR",
+        self.bot.execute(self.bot.crypto_strategy, "ETH/EUR",
                          Signal("long", "test"), bars_with_atr())
         self.assertAlmostEqual(self.bot.portfolio.positions["ETH/EUR"].qty, 0.2)
         # en er blijft dus ruimte over voor een tweede munt
-        self.bot.execute(self.bot._momentum(), "SOL/EUR",
+        self.bot.execute(self.bot.crypto_strategy, "SOL/EUR",
                          Signal("long", "test"), bars_with_atr())
         self.assertAlmostEqual(self.bot.portfolio.positions["SOL/EUR"].qty, 0.2)
 
     def test_per_position_cap_works_without_budget(self):
         config.CRYPTO_BUDGET = 0.0
         config.CRYPTO_MAX_PER_POSITION = 30.0
-        self.bot.execute(self.bot._momentum(), "ETH/EUR",
+        self.bot.execute(self.bot.crypto_strategy, "ETH/EUR",
                          Signal("long", "test"), bars_with_atr())
         self.assertAlmostEqual(self.bot.portfolio.positions["ETH/EUR"].qty, 0.3)
 

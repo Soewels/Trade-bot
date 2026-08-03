@@ -136,6 +136,25 @@ falling market the universe simply shrinks. The fixed `CRYPTO_SYMBOLS`
 list is the seed until the first scan completes (and the whole universe
 when auto mode is off).
 
+### Strategy lab: the bot searches for better strategies itself
+
+The crypto leg runs one **active strategy** (the "champion", momentum
+breakout by default). Every `STRATEGY_LAB_HOURS` (24h, `0` = off) the bot
+backtests a library of candidate strategies — three breakout variants
+(standard/fast/slow), an RSI-dip buyer, a Bollinger-band dip buyer and a
+9/21 EMA cross — on the most recent ~720 candles of its own crypto
+universe, using the same rules as live trading (1% ATR risk, trailing
+stops, Kraken fees). Scores penalise drawdown: `return − 0.5 × max
+drawdown`.
+
+To avoid overfitting, the history is split into **two halves**: a
+challenger only replaces the champion when it (1) made at least 4 trades,
+(2) beat the champion in **both** halves, and (3) scored at least
+`STRATEGY_LAB_MIN_IMPROVEMENT` (25%) better overall. Ties go to the
+incumbent. A switch is announced on Telegram (🧪) and the active strategy
+is shown on the dashboard; the choice is persisted across restarts. Open
+positions keep the rules they were opened with.
+
 ### Notes on shorting (EU)
 
 Shorting UCITS ETFs requires an IBKR **margin account** plus borrowable
