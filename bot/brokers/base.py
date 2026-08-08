@@ -23,7 +23,12 @@ class Broker:
     name: str = "base"
 
     def connect(self) -> None:
-        """Establish the connection; called once at startup."""
+        """Establish the connection; called at startup and after a
+        detected connection loss (must therefore be safe to call again)."""
+
+    def disconnect(self) -> None:
+        """Tear the connection down so connect() can start clean; a no-op
+        for brokers without a persistent connection."""
 
     # --- account ---------------------------------------------------------
 
