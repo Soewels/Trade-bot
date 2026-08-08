@@ -105,6 +105,9 @@ class Bot:
         self.connected_brokers: set = set()
         self._next_connect_try = 0.0
         self._connect_delay = 15.0
+        # laatst bekende equity per broker: valt een verbinding weg, dan
+        # handelen de overige brokers door op deze laatst bekende stand
+        self._equity_cache: dict[str, float] = {}
         # de actieve crypto-strategie ("kampioen"); het strategie-lab kan
         # deze later vervangen door een beter geteste uitdager
         self.crypto_strategy = next(
@@ -134,9 +137,40 @@ class Bot:
             self._next_connect_try = time.time() + self._connect_delay
             self._connect_delay = min(self._connect_delay * 2, 120)
 
+    def mark_broker_down(self, broker, exc) -> None:
+        """Een 'verbonden' broker blijkt dood: terug naar de verbind-wachtrij.
+
+        Cruciaal: één kapotte broker mag de rest niet blokkeren — de
+        instrumenten van deze broker slapen tot de herverbinding slaagt,
+        al het andere handelt gewoon door."""
+        if broker not in self.connected_brokers:
+            return
+        self.connected_brokers.discard(broker)
+        self.pending_brokers.add(broker)
+        self._next_connect_try = 0.0
+        self._connect_delay = 15.0
+        try:
+            broker.disconnect()
+        except Exception as cleanup_exc:
+            log.debug("opruimen van %s-verbinding: %s", broker.name, cleanup_exc)
+        log.warning("verbinding met %s verloren (%s); bot verbindt "
+                    "automatisch opnieuw", broker.name, exc)
+        self.portfolio.notify(
+            f"⚠️ Verbinding met {broker.name} verloren — de bot probeert het "
+            "automatisch opnieuw; de andere brokers handelen gewoon door")
+
     def total_equity(self) -> float:
-        """Vermogen over de brokers die nu verbonden zijn."""
-        return sum(broker.equity() for broker in self.connected_brokers)
+        """Vermogen over alle brokers. Reageert een broker niet, dan wordt
+        die als 'niet verbonden' gemarkeerd en blijft zijn laatst bekende
+        stand meetellen (het geld staat er nog steeds) — zo kan de rest
+        gewoon blijven handelen."""
+        for broker in sorted(self.connected_brokers, key=lambda b: b.name):
+            try:
+                self._equity_cache[broker.name] = broker.equity()
+            except Exception as exc:
+                self.mark_broker_down(broker, exc)
+        return sum(self._equity_cache.get(broker.name, 0.0)
+                   for broker in set(self.brokers.values()))
 
     # --- US stock screener --------------------------------------------------------
 

@@ -96,6 +96,11 @@ class IBKRBroker(Broker):
         self._fx_cache: dict[str, tuple[float, float]] = {}  # ccy -> (rate, ts)
 
     def connect(self) -> None:
+        # herverbinden na een gevallen gateway: eerst netjes opruimen,
+        # anders weigert ib_async een tweede connect op hetzelfde object
+        if self.ib.isConnected():
+            return
+        self.disconnect()
         self.ib.connect(self.host, self.port, clientId=self.client_id,
                         timeout=20)
         # Delayed data works without paid subscriptions; real-time quotes
@@ -103,6 +108,12 @@ class IBKRBroker(Broker):
         self.ib.reqMarketDataType(3)
         log.info("connected to IBKR at %s:%s (client id %s)",
                  self.host, self.port, self.client_id)
+
+    def disconnect(self) -> None:
+        try:
+            self.ib.disconnect()
+        except Exception as exc:
+            log.debug("IBKR disconnect: %s", exc)
 
     def _contract(self, symbol: str):
         if symbol in self._contracts:
@@ -149,6 +160,11 @@ class IBKRBroker(Broker):
     # --- account ---------------------------------------------------------
 
     def _account_value(self, tag: str) -> float:
+        # accountSummary() kan verouderde cache-waarden teruggeven nadat de
+        # gateway is gevallen — expliciet checken, anders blijft een dode
+        # verbinding onopgemerkt
+        if not self.ib.isConnected():
+            raise BrokerError("geen verbinding met IBKR (gateway herstart?)")
         for row in self.ib.accountSummary():
             if row.tag == tag:
                 return float(row.value)
