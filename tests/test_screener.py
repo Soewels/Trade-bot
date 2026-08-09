@@ -75,6 +75,15 @@ class WorldwideScreenerTests(unittest.TestCase):
         noon = datetime(2026, 7, 14, 4, 0, tzinfo=ZoneInfo("UTC"))  # 12:00 HK
         self.assertTrue(exchange_is_open("SEHK", noon))
 
+    def test_location_hours_fallback_covers_all_configured_locations(self):
+        # elke scan-locatie uit de config heeft een terugval-tijdzone, en
+        # die verwijst naar een echte sleutel in de openingstijden-tabel
+        from bot.brokers.ibkr_broker import EXCHANGE_HOURS, LOCATION_TO_HOURS
+        for region_locations in config.REGION_LOCATIONS.values():
+            for location in region_locations:
+                self.assertIn(location, LOCATION_TO_HOURS)
+                self.assertIn(LOCATION_TO_HOURS[location], EXCHANGE_HOURS)
+
     def test_find_liquid_stocks_skips_gbp_and_unknown(self):
         class ScanStub:
             def __init__(self):
@@ -86,6 +95,12 @@ class WorldwideScreenerTests(unittest.TestCase):
                     {"symbol": "SAP", "currency": "EUR", "primaryExchange": "IBIS"},
                     {"symbol": "SHEL", "currency": "GBP", "primaryExchange": "LSE"},
                     {"symbol": "RAAR", "currency": "USD", "primaryExchange": "GEHEIM"},
+                    # scanner liet primaryExchange leeg, maar de scan-locatie
+                    # gaf een hours-hint mee: moet gewoon meedoen
+                    {"symbol": "PLTR", "currency": "USD", "primaryExchange": "",
+                     "hours": "US"},
+                    # leeg én geen hint: veiligheidsfilter slaat over
+                    {"symbol": "MYST", "currency": "USD", "primaryExchange": ""},
                 ]
 
             def add_instrument(self, symbol, meta):
@@ -102,13 +117,15 @@ class WorldwideScreenerTests(unittest.TestCase):
                                            min_market_cap_musd=1e4,
                                            min_dollar_volume=50e6,
                                            locations=["STK.US.MAJOR"])
-        self.assertEqual(set(ranked), {"NVDA", "SAP"})
+        self.assertEqual(set(ranked), {"NVDA", "SAP", "PLTR"})
         self.assertNotIn("SHEL", metas)   # GBP/pence uitgesloten
         self.assertNotIn("RAAR", metas)   # onbekende beurs uitgesloten
+        self.assertNotIn("MYST", metas)   # leeg zonder hint uitgesloten
         self.assertEqual(metas["SAP"]["hours"], "IBIS")
+        self.assertEqual(metas["PLTR"]["hours"], "US")  # hint uit scan-locatie
         self.assertEqual(metas["NVDA"]["currency"], "USD")
-        # SAP (EUR, fx 1.0) komt boven NVDA (USD, fx 0.9)
-        self.assertEqual(ranked, ["SAP", "NVDA"])
+        # SAP (EUR, fx 1.0) komt boven de USD-aandelen (fx 0.9)
+        self.assertEqual(ranked[0], "SAP")
 
 
 class MergeUniverseTests(unittest.TestCase):

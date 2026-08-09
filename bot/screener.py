@@ -81,10 +81,12 @@ def find_liquid_stocks(broker, count: int, min_price: float,
         if currency == "GBP":
             log.info("kandidaat %s overgeslagen: GBP/pence-notering", symbol)
             continue
-        hours = hours_for_primary_exchange(primary)
+        # de scanner laat primaryExchange vaak leeg; de scan-locatie geeft
+        # dan al een betrouwbare 'hours'-hint mee
+        hours = cand.get("hours") or hours_for_primary_exchange(primary)
         if hours is None:
             log.info("kandidaat %s overgeslagen: onbekende beurs %s",
-                     symbol, primary)
+                     symbol, primary or "(leeg)")
             continue
         meta = {"exchange": "SMART", "currency": currency,
                 "primaryExchange": primary, "hours": hours}

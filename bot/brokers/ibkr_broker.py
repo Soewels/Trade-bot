@@ -52,6 +52,20 @@ def hours_for_primary_exchange(primary_exchange: str):
     """EXCHANGE_HOURS-sleutel voor een primaryExchange, of None = onbekend."""
     return PRIMARY_TO_HOURS.get(primary_exchange)
 
+
+# De scanner geeft contracten vaak terug ZONDER primaryExchange; de
+# scan-locatie zelf vertelt dan in welke regio (en dus beurstijden) het
+# aandeel noteert.
+LOCATION_TO_HOURS = {
+    "STK.US.MAJOR": "US", "STK.US": "US",
+    "STK.EU.IBIS": "IBIS", "STK.EU.AEB": "AEB", "STK.EU.SBF": "SBF",
+    "STK.HK.SEHK": "SEHK", "STK.JP.TSEJ": "TSEJ",
+}
+
+# VS-fondsen (ETF's e.d.) zijn door PRIIPs niet toegestaan voor Europese
+# particulieren — losse aandelen (incl. REIT's en ADR's) wél.
+BLOCKED_STOCK_TYPES = {"ETF", "ETN", "ETC", "ETP", "FUND", "UNIT"}
+
 # reqHistoricalData wants a duration string; pick one that comfortably
 # covers `limit` bars of the given size (~200+ bars for the 200 EMA).
 DURATION_BY_MINUTES = {15: "10 D", 60: "60 D", 240: "1 Y", 1440: "3 M"}
@@ -256,13 +270,24 @@ class IBKRBroker(Broker):
                 log.warning("scanner-locatie %s overgeslagen: %s", location, exc)
                 continue
             for row in results:
-                contract = row.contractDetails.contract
+                details = row.contractDetails
+                contract = details.contract
                 if contract.symbol in seen:
                     continue
                 seen.add(contract.symbol)
+                stock_type = (getattr(details, "stockType", "") or "").upper()
+                if stock_type in BLOCKED_STOCK_TYPES:
+                    log.info("scanner: %s overgeslagen (VS-fonds/%s — niet "
+                             "toegestaan voor EU-beleggers)",
+                             contract.symbol, stock_type)
+                    continue
+                primary = contract.primaryExchange or ""
+                hours = (PRIMARY_TO_HOURS.get(primary)
+                         or LOCATION_TO_HOURS.get(location))
                 candidates.append({"symbol": contract.symbol,
                                    "currency": contract.currency,
-                                   "primaryExchange": contract.primaryExchange})
+                                   "primaryExchange": primary,
+                                   "hours": hours})
         return candidates
 
     # --- currency conversion --------------------------------------------------------
