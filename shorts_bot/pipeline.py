@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from . import assemble, captions, script_writer, tts, video, youtube
+from . import assemble, captions, export, script_writer, tts, video, youtube
 from .state import Posted, utc_stamp
 
 log = logging.getLogger("shorts")
@@ -68,6 +68,11 @@ def run_once(config, niche, state, slot: str = "") -> Result:
         log.info("[%s] monteren", niche.key)
         raw = assemble.concat_shots(shots, work, config)
         final = assemble.render_final(raw, voice, ass_path, work / "short.mp4", config)
+
+        if config.export:
+            target = export.export_assets(config, niche, script, work, final, words)
+            log.info("[%s] geëxporteerd naar %s — niet geüpload", niche.key, target)
+            return Result(title=script.title, niche=niche.key, path=str(target))
 
         if config.dry_run:
             keep = Path(config.state_dir) / f"dryrun-{work.name}.mp4"

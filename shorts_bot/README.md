@@ -110,6 +110,38 @@ om een complete video te maken zonder hem te publiceren.
 24/7 draaien gaat met de systemd-service in
 [`deploy/shorts-bot.service`](../deploy/shorts-bot.service).
 
+## Zelf monteren in CapCut
+
+Wil je een video met de hand oppoetsen in plaats van hem automatisch te laten
+plaatsen, gebruik dan de exportstand:
+
+```bash
+python -m shorts_bot.main once --export
+```
+
+De bot rendert dan alles, uploadt niets, en zet de onderdelen los in
+`shorts_export/`:
+
+| Bestand | Wat het is |
+|---------|------------|
+| `short.mp4` | Wat de bot zelf zou hebben gepost — als referentie of om zo te uploaden |
+| `shots/` | De losse clips, op volgorde, met sfeergeluid maar zonder stem |
+| `voice.wav` | De kale voice-over |
+| `captions.srt` | De ondertitels — **dit is het bestand voor CapCut** |
+| `captions.ass` | Dezelfde ondertitels met de opmaak van de bot; niet voor CapCut |
+| `script.txt` | De narratie per shot, plus de gebruikte beeldprompts |
+| `youtube.txt` | Titel, beschrijving en tags om te plakken |
+| `LEESMIJ.txt` | De importstappen |
+
+In CapCut: **Tekst → Automatische ondertiteling → Lokale ondertiteling →
+Importeren**, en kies `captions.srt`. Houd je het sfeergeluid van de clips
+aan, zet het dan zo'n 18 dB onder de stem, anders praat het eroverheen.
+
+> Ondertitels importeren kan alleen in CapCut op de computer of in de browser.
+> De mobiele app kan geen ondertitelbestand inlezen.
+
+Wil je dit altijd, zet dan `SHORTS_EXPORT=1` in `.env`.
+
 ## Twee dingen die mensen verrassen
 
 **Je nieuwe API-project staat als "unaudited".** Google zet dan élke upload op

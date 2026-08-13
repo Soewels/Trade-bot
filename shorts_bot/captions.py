@@ -85,6 +85,53 @@ def chunk(items, size):
     return [items[i:i + size] for i in range(0, len(items), size)]
 
 
+def group_words(words, max_words: int = 6, max_chars: int = 42):
+    """Groepeer woorden tot leesbare regels, met een knip op zinseindes.
+
+    Voor het SRT-bestand dat je in CapCut importeert. Anders dan bij de
+    karaoke-ondertitels telt hier leesbaarheid: een regel die midden in een zin
+    afbreekt terwijl er een punt vlakbij staat, leest slechter dan een korte regel.
+    """
+    lines, current, length = [], [], 0
+    for word in words:
+        current.append(word)
+        length += len(word.text) + 1
+        ends_sentence = word.text.rstrip().endswith((".", "?", "!", ":"))
+        if ends_sentence or len(current) >= max_words or length >= max_chars:
+            lines.append(current)
+            current, length = [], 0
+    if current:
+        lines.append(current)
+    return lines
+
+
+def srt_time(seconds: float) -> str:
+    """Seconden naar HH:MM:SS,mmm — het tijdformaat van SRT."""
+    seconds = max(0.0, seconds)
+    hours, rest = divmod(seconds, 3600)
+    minutes, secs = divmod(rest, 60)
+    whole = int(secs)
+    millis = int(round((secs - whole) * 1000))
+    if millis == 1000:  # afronding mag niet naar 1,000 doorslaan
+        whole, millis = whole + 1, 0
+    return f"{int(hours):02d}:{int(minutes):02d}:{whole:02d},{millis:03d}"
+
+
+def build_srt(words, max_words: int = 6) -> str:
+    """Bouw een gewoon SRT-bestand — het formaat dat CapCut kan importeren."""
+    if not words:
+        raise CaptionError("geen woorden om te ondertitelen")
+
+    blocks = []
+    for index, line in enumerate(group_words(words, max_words), start=1):
+        start, end = line[0].start, line[-1].end
+        if end <= start:
+            end = start + 0.4
+        text = " ".join(word.text for word in line).strip()
+        blocks.append(f"{index}\n{srt_time(start)} --> {srt_time(end)}\n{text}\n")
+    return "\n".join(blocks)
+
+
 def _style_block(style: str, config, highlight: str) -> str:
     size = FONT_SIZE.get(style, 80)
     font = config.caption_font

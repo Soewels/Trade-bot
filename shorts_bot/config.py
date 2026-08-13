@@ -72,6 +72,8 @@ class ShortsConfig:
     work_dir: Path = PROJECT_ROOT / ".shorts_work"
     keep_work_dirs: bool = False
     dry_run: bool = False
+    export: bool = False
+    export_dir: Path = PROJECT_ROOT / "shorts_export"
 
     # --- schrijver (Claude) ------------------------------------------------
     anthropic_api_key: str = ""
@@ -147,6 +149,10 @@ class ShortsConfig:
             work_dir=Path(_str("SHORTS_WORK_DIR", str(PROJECT_ROOT / ".shorts_work"))).expanduser(),
             keep_work_dirs=_bool("SHORTS_KEEP_WORK", False),
             dry_run=_bool("SHORTS_DRY_RUN", False),
+            export=_bool("SHORTS_EXPORT", False),
+            export_dir=Path(
+                _str("SHORTS_EXPORT_DIR", str(PROJECT_ROOT / "shorts_export"))
+            ).expanduser(),
             anthropic_api_key=_str("ANTHROPIC_API_KEY"),
             claude_model=_str("SHORTS_CLAUDE_MODEL", "claude-opus-5"),
             claude_effort=_str("SHORTS_CLAUDE_EFFORT", "medium"),

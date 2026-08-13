@@ -143,6 +143,8 @@ def cmd_script(config, args) -> int:
 
 
 def cmd_once(config, args) -> int:
+    if getattr(args, "export", False):
+        config.export = True
     niche = niches_mod.get(args.niche) if args.niche else niches_mod.rotate(
         config.niches, _load(config).successful()
     )
@@ -154,6 +156,11 @@ def cmd_once(config, args) -> int:
     print(f"Klaar: {result.title}")
     if result.video_id:
         print(f"https://youtube.com/shorts/{result.video_id}")
+    elif config.export:
+        print(f"\nExportmap: {result.path}")
+        print("Sleep de bestanden uit shots/ op de tijdlijn en importeer")
+        print("captions.srt via Tekst -> Automatische ondertiteling -> Lokale ondertiteling.")
+        print("Zie LEESMIJ.txt in die map voor de volledige stappen.")
     else:
         print(f"Bestand: {result.path}")
     return 0
@@ -193,6 +200,12 @@ def build_parser() -> argparse.ArgumentParser:
     for name, helptext in (("script", "alleen een script"), ("once", "één video, nu")):
         p = sub.add_parser(name, help=helptext)
         p.add_argument("--niche", help=f"een van: {', '.join(sorted(niches_mod.NICHES))}")
+        if name == "once":
+            p.add_argument(
+                "--export",
+                action="store_true",
+                help="niet uploaden, maar alle onderdelen los wegschrijven voor CapCut",
+            )
 
     return parser
 
