@@ -51,7 +51,50 @@ pip install -r requirements-shorts.txt
 ```bash
 sudo apt install ffmpeg        # Debian/Ubuntu
 brew install ffmpeg            # macOS
+winget install Gyan.FFmpeg     # Windows
 ```
+
+Controleer daarna dat `ffmpeg -version` werkt in een nieuwe terminal; op
+Windows moet de map met `ffmpeg.exe` in je PATH staan.
+
+### 2b. Windows
+
+Op Windows zijn er drie dingen anders. Sla dit niet over — het zijn precies
+de plekken waar de installatie stukloopt.
+
+**Python 3.12, niet 3.13.** Een deel van de afhankelijkheden van Kokoro
+(`misaki`, en `numpy<2.0`) ondersteunt 3.13 nog niet:
+
+```powershell
+py -3.12 -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements-shorts.txt
+```
+
+**espeak-ng erbij voor de stem.** Kokoro zet tekst om in klanken via espeak-ng,
+en dat zit op Windows niet in het pip-pakket. Zonder deze stap krijg je
+`RuntimeError: espeak not installed on your system`. Installeer het van
+[github.com/espeak-ng/espeak-ng/releases](https://github.com/espeak-ng/espeak-ng/releases)
+en zorg dat `espeak-ng.exe`, `libespeak-ng.dll` en de map `espeak-ng-data` in
+je PATH staan.
+
+> Lukt dat niet, dan hoef je niet vast te lopen: zet `SHORTS_TTS_BACKEND=command`
+> en geef in `SHORTS_TTS_COMMAND` een andere TTS-engine op. De bot gebruikt dan
+> jouw commando en heeft Kokoro helemaal niet nodig.
+
+**LTX zonder `--extra natten`.** Die extra bouwt een CUDA-uitbreiding die
+alleen voor Linux is bedoeld en op Windows vrijwel zeker faalt:
+
+```powershell
+uv sync
+```
+
+**Geen systemd.** `deploy/shorts-bot.service` is Linux-only. Op Windows laat je
+`python -m shorts_bot.main run` gewoon in een terminalvenster staan, of je maakt
+een taak in Taakplanner die dat commando bij het inloggen start.
+
+Gebruik in `.env` schuine strepen in paden (`C:/Users/jij/LTX-2`); dat werkt op
+Windows net zo goed en scheelt gedoe met backslashes.
 
 ### 3. LTX-2.3
 
@@ -60,7 +103,7 @@ Het videomodel zit in een eigen repository met eigen gewichten:
 ```bash
 git clone https://github.com/Lightricks/LTX-2
 cd LTX-2
-uv sync --extra natten
+uv sync --extra natten     # op Windows: alleen `uv sync`, zie 2b
 hf download Lightricks/LTX-2.3
 ```
 
