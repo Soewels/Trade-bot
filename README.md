@@ -11,6 +11,12 @@ paper-modus: geen API-key nodig, geen echt geld.
 > de Amerikaanse markt via Alpaca — zie [`bot/README.md`](bot/README.md).
 > Starten: `python -m bot.main` (instellingen in `.env`, zie `.env.example`).
 
+> 🎬 **Ook nieuw**: een **Shorts-bot** in [`shorts_bot/`](shorts_bot/) die zelf
+> YouTube Shorts maakt en publiceert, 2-3 per dag. Script via Claude, stem via
+> Kokoro, beeld via LTX-2.3 op je eigen GPU — geen kosten per video.
+> Starten: `python -m shorts_bot.main doctor`, zie
+> [`shorts_bot/README.md`](shorts_bot/README.md).
+
 ## Functies
 
 - 📈 **Vijf strategieën**: SMA-crossover en Breakout (trendvolgend), RSI en

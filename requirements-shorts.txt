@@ -1,0 +1,21 @@
+# Shorts-bot (shorts_bot/) — los van de trading-bot.
+# Installeren:  pip install -r requirements-shorts.txt
+#
+# LTX-2.3 zelf zit hier NIET in: dat is een aparte repository met eigen
+# modelgewichten van ~30 GB. Zie shorts_bot/README.md, stap 3.
+
+# De schrijver
+anthropic>=0.40
+
+# De stem — Kokoro-82M, Apache 2.0, draait op de CPU
+kokoro>=0.9
+soundfile>=0.12
+numpy>=1.24
+
+# De woord-timing voor de ondertitels
+faster-whisper>=1.0
+
+# De upload naar YouTube
+google-api-python-client>=2.100
+google-auth-oauthlib>=1.2
+google-auth>=2.30

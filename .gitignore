@@ -9,3 +9,8 @@ bot_state.json
 alpaca_state.json
 trades.csv
 daily_pnl.csv
+
+# Shorts-bot
+.shorts_state/
+.shorts_work/
+client_secret.json

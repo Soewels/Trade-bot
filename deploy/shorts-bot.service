@@ -1,0 +1,35 @@
+# systemd-service voor de Shorts-bot.
+#
+#   sudo cp deploy/shorts-bot.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now shorts-bot
+#   journalctl -u shorts-bot -f
+#
+# Pas User, WorkingDirectory en ExecStart aan op je eigen installatie.
+# Let op: autoriseer YouTube eerst handmatig (python -m shorts_bot.main auth),
+# want die stap opent een browser en kan niet vanuit een service.
+
+[Unit]
+Description=Shorts-bot — genereert en publiceert YouTube Shorts
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=soewels
+WorkingDirectory=/home/soewels/Trade-bot
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/soewels/Trade-bot/.venv/bin/python -m shorts_bot.main run
+Restart=always
+RestartSec=30
+
+# Het renderen vreet geheugen en GPU; laat de rest van de machine voorgaan.
+Nice=10
+IOSchedulingClass=idle
+
+# De bot schrijft alleen in zijn eigen werk- en statusmappen.
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
