@@ -15,3 +15,4 @@ daily_pnl.csv
 .shorts_work/
 client_secret.json
 shorts_export/
+shorts_workflow_api.json

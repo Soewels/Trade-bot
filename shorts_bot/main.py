@@ -78,6 +78,19 @@ def cmd_doctor(config, args) -> int:
             config.ltx_repo.exists(),
             "git clone https://github.com/Lightricks/LTX-2 en zet LTX_REPO in .env",
         )
+    if config.video_backend == "comfy":
+        from .comfy import ComfyBackend
+
+        check(
+            f"workflow ({config.comfy_workflow.name})",
+            config.comfy_workflow.exists(),
+            "exporteer in ComfyUI via Workflow -> Export (API) en zet COMFY_WORKFLOW",
+        )
+        check(
+            f"ComfyUI bereikbaar ({config.comfy_url})",
+            ComfyBackend(config).reachable(),
+            "start ComfyUI en laat het draaien terwijl de bot rendert",
+        )
 
     print("\nPakketten")
     for module, hint in (

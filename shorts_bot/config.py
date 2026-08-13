@@ -111,6 +111,12 @@ class ShortsConfig:
     ltx_extra_args: str = ""
     ltx_timeout: int = 1800
 
+    # --- beeld via ComfyUI (route voor kaarten met weinig VRAM) ------------
+    comfy_url: str = "http://127.0.0.1:8188"
+    comfy_workflow: Path = PROJECT_ROOT / "shorts_workflow_api.json"
+    comfy_timeout: int = 1800
+    comfy_poll_seconds: float = 3.0
+
     # --- woord-timing (Whisper) --------------------------------------------
     whisper_model: str = "base.en"
     whisper_device: str = "cpu"
@@ -183,6 +189,12 @@ class ShortsConfig:
             ltx_height_flag=_str("LTX_HEIGHT_FLAG", "--height"),
             ltx_extra_args=_str("LTX_EXTRA_ARGS"),
             ltx_timeout=_int("LTX_TIMEOUT", 1800),
+            comfy_url=_str("COMFY_URL", "http://127.0.0.1:8188"),
+            comfy_workflow=Path(
+                _str("COMFY_WORKFLOW", str(PROJECT_ROOT / "shorts_workflow_api.json"))
+            ).expanduser(),
+            comfy_timeout=_int("COMFY_TIMEOUT", 1800),
+            comfy_poll_seconds=_float("COMFY_POLL_SECONDS", 3.0),
             whisper_model=_str("SHORTS_WHISPER_MODEL", "base.en"),
             whisper_device=_str("SHORTS_WHISPER_DEVICE", "cpu"),
             whisper_compute=_str("SHORTS_WHISPER_COMPUTE", "int8"),

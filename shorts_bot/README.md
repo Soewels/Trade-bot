@@ -96,7 +96,68 @@ een taak in Taakplanner die dat commando bij het inloggen start.
 Gebruik in `.env` schuine strepen in paden (`C:/Users/jij/LTX-2`); dat werkt op
 Windows net zo goed en scheelt gedoe met backslashes.
 
-### 3. LTX-2.3
+### 3. Het videomodel — kies je route
+
+Er zijn twee manieren om LTX te draaien, en welke past hangt af van je kaart.
+
+| | VRAM | Download | Audio | Snelheid |
+|---|---|---|---|---|
+| **ComfyUI + GGUF** (`comfy`) | vanaf ~8 GB | 14-17 GB | ja | 2-3 min per clip van 5s |
+| **Officiële opdrachtregel** (`ltx`) | 24 GB+ | 46 GB | ja | sneller, maar past niet op kleine kaarten |
+
+**Met 10 of 12 GB VRAM neem je ComfyUI.** De officiële opdrachtregel wil de
+volledige gewichten van 46 GB; die passen niet, ook niet met uitwijken naar je
+werkgeheugen. ComfyUI werkt met gekwantiseerde GGUF-versies en parkeert wat niet
+past in je RAM — trager, maar het draait. Reken op 32 GB werkgeheugen.
+
+#### 3a. Route ComfyUI (aanbevolen bij weinig VRAM)
+
+1. Installeer [ComfyUI](https://github.com/comfyanonymous/ComfyUI).
+2. Installeer de LTXVideo-nodes: in ComfyUI Manager zoeken op *LTXVideo*, of
+   `git clone https://github.com/Lightricks/ComfyUI-LTXVideo` in `custom_nodes/`.
+3. Haal de vijf onderdelen op en zet ze in de juiste map van ComfyUI:
+
+   | Onderdeel | Map |
+   |---|---|
+   | de gekwantiseerde transformer (`...-Q4_K_S.gguf`) | `models/unet/` |
+   | de Gemma-tekstencoder (GGUF) | `models/clip/` |
+   | de tekstprojectie (`...text_projection...safetensors`) | `models/clip/` |
+   | de video-VAE | `models/vae/` |
+   | de audio-VAE | `models/vae/` |
+
+   De actuele bestandsnamen staan in de
+   [officiële ComfyUI-handleiding voor LTX-2.3](https://docs.comfy.org/tutorials/video/ltx/ltx-2-3).
+   De GGUF-bestanden komen van community-repositories zoals `QuantStack/LTX-2.3-GGUF`
+   of `unsloth/LTX-2.3-GGUF`.
+
+   > **Belangrijkste valkuil:** pak niet zomaar een willekeurige Gemma-GGUF. De
+   > loader verwacht precies de variant die bij deze workflow hoort; een andere
+   > heeft andere tensornamen en laadt niet.
+
+4. Bouw in ComfyUI een werkende tekst-naar-video workflow en render één clip met
+   de hand. Werkt dat niet, dan werkt de bot ook niet — los het daar eerst op.
+5. Exporteer via **Workflow → Export (API)**. Let op: dat is een ánder bestand
+   dan de gewone export.
+6. Zet in dat bestand de plaatshouders op de plekken die per video wisselen:
+
+   | Plaatshouder | Waar |
+   |---|---|
+   | `%PROMPT%` | het tekstveld van je positieve prompt |
+   | `%SEED%` | de seed van de sampler |
+   | `%WIDTH%` / `%HEIGHT%` | de afmetingen van de lege latent |
+   | `%FRAMES%` | het aantal frames |
+
+   `%PROMPT%` mag middenin een langere tekst staan, bijvoorbeeld
+   `"%PROMPT%, cinematic, film grain"`. De rest vervang je één-op-één.
+
+7. Zet `SHORTS_VIDEO_BACKEND=comfy` en `COMFY_WORKFLOW` in `.env`, laat ComfyUI
+   draaien, en draai `python -m shorts_bot.main doctor`.
+
+Er staat bewust geen enkele node-naam in de code: de bot vult alleen de
+plaatshouders in en stuurt jouw workflow door. Verbouw je hem, of hernoemt
+ComfyUI zijn nodes, dan blijft de bot werken.
+
+#### 3b. Route officiële opdrachtregel (24 GB VRAM of meer)
 
 Het videomodel zit in een eigen repository met eigen gewichten:
 

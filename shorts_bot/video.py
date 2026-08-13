@@ -116,10 +116,15 @@ class DummyBackend:
 
 def make_video_backend(config):
     backend = config.video_backend.lower()
+    if backend == "comfy":
+        from .comfy import ComfyBackend
+
+        return ComfyBackend(config)
     if backend == "ltx":
         return LtxBackend(config)
     if backend in ("dummy", "test"):
         return DummyBackend(config)
     raise VideoError(
-        f"onbekende SHORTS_VIDEO_BACKEND {config.video_backend!r} — kies ltx of dummy"
+        f"onbekende SHORTS_VIDEO_BACKEND {config.video_backend!r} — "
+        "kies comfy, ltx of dummy"
     )
