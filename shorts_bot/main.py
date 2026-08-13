@@ -130,9 +130,17 @@ def cmd_script(config, args) -> int:
 
     niche = niches_mod.get(args.niche or config.niches[0])
     state = _load(config)
+    angle = script_writer.pick_angle(niche, state.last_angles.get(niche.key, ""))
     script = script_writer.write_script(
-        config, niche, state.recent_titles(config.dedupe_history)
+        config, niche, state.recent_titles(config.dedupe_history), angle
     )
+    # Ook een script dat je alleen bekijkt telt mee, anders krijg je bij de
+    # volgende keer hetzelfde onderwerp terug.
+    state.remember_draft(script.title)
+    state.remember_angle(niche.key, angle)
+    state.save()
+
+    print(f"\nInvalshoek: {angle}")
     print(f"\n{script.title}\n{'=' * len(script.title)}\n")
     for index, shot in enumerate(script.shots, start=1):
         print(f"[{index}] {shot.narration}")

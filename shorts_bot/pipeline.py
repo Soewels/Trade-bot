@@ -43,10 +43,16 @@ def run_once(config, niche, state, slot: str = "") -> Result:
     work = _work_dir(config, niche)
 
     try:
-        log.info("[%s] script schrijven", niche.key)
+        angle = script_writer.pick_angle(niche, state.last_angles.get(niche.key, ""))
+        log.info("[%s] script schrijven — invalshoek: %s", niche.key, angle)
         script = script_writer.write_script(
-            config, niche, state.recent_titles(config.dedupe_history)
+            config, niche, state.recent_titles(config.dedupe_history), angle
         )
+        # Meteen vastleggen: ook een video die verderop strandt telt mee voor de
+        # dubbelcheck, anders komt hetzelfde onderwerp bij de volgende poging terug.
+        state.remember_draft(script.title)
+        state.remember_angle(niche.key, angle)
+        state.save()
         log.info("[%s] titel: %s", niche.key, script.title)
 
         log.info("[%s] stem inspreken (%s)", niche.key, config.tts_voice)

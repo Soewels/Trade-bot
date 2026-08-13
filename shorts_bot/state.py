@@ -37,6 +37,8 @@ class Posted:
 class State:
     path: Path
     posted: list = field(default_factory=list)
+    drafts: list = field(default_factory=list)
+    last_angles: dict = field(default_factory=dict)
     quota_day: str = ""
     quota_used: int = 0
 
@@ -52,6 +54,8 @@ class State:
         return cls(
             path=path,
             posted=[Posted(**item) for item in raw.get("posted", [])],
+            drafts=list(raw.get("drafts", [])),
+            last_angles=dict(raw.get("last_angles", {})),
             quota_day=raw.get("quota_day", ""),
             quota_used=int(raw.get("quota_used", 0)),
         )
@@ -60,6 +64,8 @@ class State:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "posted": [p.to_dict() for p in self.posted],
+            "drafts": self.drafts[-200:],
+            "last_angles": self.last_angles,
             "quota_day": self.quota_day,
             "quota_used": self.quota_used,
         }
@@ -77,8 +83,27 @@ class State:
         self.posted.append(entry)
 
     def recent_titles(self, limit: int) -> list:
-        """Titels van eerdere video's, voor de dubbelcheck van de schrijver."""
-        return [p.title for p in self.posted[-limit:] if p.title]
+        """Titels die de schrijver moet vermijden.
+
+        Bewust inclusief concepten die nooit geplaatst zijn: wie `script` een
+        paar keer draait om de kwaliteit te beoordelen, moet niet elke keer
+        hetzelfde onderwerp terugkrijgen.
+        """
+        titles = [p.title for p in self.posted if p.title] + list(self.drafts)
+        seen, unique = set(), []
+        for title in reversed(titles):          # nieuwste eerst
+            if title not in seen:
+                seen.add(title)
+                unique.append(title)
+        return unique[:limit]
+
+    def remember_draft(self, title: str) -> None:
+        """Leg een geschreven script vast, ook als het nooit gepubliceerd wordt."""
+        if title and title not in self.drafts:
+            self.drafts.append(title)
+
+    def remember_angle(self, niche: str, angle: str) -> None:
+        self.last_angles[niche] = angle
 
     def count_for_niche(self, niche: str) -> int:
         return sum(1 for p in self.posted if p.niche == niche and p.video_id)

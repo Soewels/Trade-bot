@@ -17,6 +17,7 @@ class Niche:
     highlight: str              # kleur van het actieve woord, hex
     youtube_category: str       # YouTube categoryId
     brief: str                  # instructies voor de schrijver
+    angles: tuple               # deelgebieden; er gaat er één mee per video
     visual_style: str           # wordt achter elke beeldprompt geplakt
     hashtags: tuple
     accuracy_rule: str          # hoe de bot met onzekere feiten omgaat
@@ -37,6 +38,20 @@ MARKETS_FINANCE = Niche(
         "Open by stating the common belief, then take it apart with a concrete number, "
         "date or name. Close on the underlying principle, not on a call to action. "
         "Never predict prices, never recommend a specific security, never imply guaranteed returns."
+    ),
+    angles=(
+        "a rule of thumb whose origin undercuts it",
+        "a statistic that only holds in one country or one era",
+        "a piece of financial jargon that hides a much simpler idea",
+        "a famous market episode that is widely misremembered",
+        "a fee, spread or tax that quietly decides the outcome",
+        "a behavioural bias with a measurable price tag",
+        "an index or benchmark that does not measure what people think it does",
+        "a product sold as safe that carries a risk buyers rarely see",
+        "a historical figure whose actual conclusion differs from the one attributed to them",
+        "a number everyone quotes without knowing where it came from",
+        "a piece of regulation that changed behaviour in an unintended direction",
+        "a comparison between two things people treat as equivalent but are not",
     ),
     visual_style=(
         "Cinematic live-action, shallow depth of field, 35mm, warm tungsten and "
@@ -66,6 +81,20 @@ HORROR_MYSTERY = Niche(
         "Favour maritime disappearances, sealed rooms, transmissions, abandoned places "
         "and archival oddities over gore or violence. "
         "The strongest ending is usually the limit of the evidence itself."
+    ),
+    angles=(
+        "a ship, boat or crew found in a state nobody could explain",
+        "a room, house or building that was sealed and later opened",
+        "a radio, television or telephone transmission nobody could trace",
+        "a place abandoned in the middle of an ordinary working day",
+        "a document, tape or photograph whose origin cannot be established",
+        "a disappearance in which the surroundings were left undisturbed",
+        "an object recovered impossibly far from where it belonged",
+        "a witness account that contradicts every surviving record",
+        "a location people are warned away from for reasons nobody agrees on",
+        "an expedition or experiment whose records stop mid-sentence",
+        "a body of water that keeps giving things back",
+        "a piece of infrastructure built for a purpose no one will name",
     ),
     visual_style=(
         "Cinematic live-action, desaturated cold palette, heavy atmosphere — fog, dust, "

@@ -6,9 +6,21 @@ aansluiten. De titels van eerdere video's gaan mee in het verzoek, zodat de
 bot zichzelf niet herhaalt.
 """
 
+import random
 from dataclasses import dataclass
 
 from . import niches as niches_mod
+
+
+def pick_angle(niche, avoid: str = "") -> str:
+    """Kies een deelgebied binnen de niche, maar nooit hetzelfde als de vorige keer.
+
+    Zonder dit levert dezelfde prompt telkens ongeveer hetzelfde idee op —
+    `temperature` bestaat niet meer op deze modellen, dus de variatie moet uit
+    de opdracht komen in plaats van uit de sampling.
+    """
+    options = [angle for angle in niche.angles if angle != avoid]
+    return random.choice(options or list(niche.angles))
 
 SCRIPT_SCHEMA = {
     "type": "object",
@@ -82,7 +94,7 @@ class WriterError(RuntimeError):
     """De schrijver kon geen bruikbaar script leveren."""
 
 
-def build_prompt(niche, config, recent_titles) -> str:
+def build_prompt(niche, config, recent_titles, angle: str = "") -> str:
     seconds = config.shots_per_video * round(config.ltx_num_frames / max(config.ltx_fps, 1))
     lines = [
         f"Write one YouTube Short for a faceless channel in the '{niche.label}' niche.",
@@ -90,6 +102,15 @@ def build_prompt(niche, config, recent_titles) -> str:
         "## Brief",
         niche.brief,
         "",
+    ]
+    if angle:
+        lines += [
+            "## This one's angle",
+            f"The subject must be {angle}. Stay inside that angle — do not fall back "
+            "on the most famous example in the niche.",
+            "",
+        ]
+    lines += [
         "## Accuracy",
         niche.accuracy_rule,
         "",
@@ -117,13 +138,15 @@ def build_prompt(niche, config, recent_titles) -> str:
     if recent_titles:
         lines += [
             "",
-            "## Already published — pick a genuinely different subject",
+            "## Already covered — pick a genuinely different subject",
+            "Not a variation on these, and not the same underlying event told from "
+            "another side. A different subject.",
             *(f"- {t}" for t in recent_titles),
         ]
     return "\n".join(lines)
 
 
-def write_script(config, niche, recent_titles=None) -> Script:
+def write_script(config, niche, recent_titles=None, angle: str = "") -> Script:
     """Vraag Claude om één compleet script. Gooit WriterError bij problemen."""
     try:
         import anthropic
@@ -136,7 +159,7 @@ def write_script(config, niche, recent_titles=None) -> Script:
         raise WriterError("ANTHROPIC_API_KEY ontbreekt in .env")
 
     client = anthropic.Anthropic(api_key=config.anthropic_api_key)
-    prompt = build_prompt(niche, config, recent_titles or [])
+    prompt = build_prompt(niche, config, recent_titles or [], angle)
 
     try:
         response = client.messages.create(
