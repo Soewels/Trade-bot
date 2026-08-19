@@ -106,7 +106,12 @@ finds them itself, across the regions in `STOCK_REGIONS` (default
 
 1. at startup (and weekly, `US_STOCK_RESCAN_DAYS`) it asks the **IBKR
    market scanner** per region for the most active stocks above
-   `US_STOCK_MIN_PRICE` and a $10B market cap;
+   `US_STOCK_MIN_PRICE` and a $10B market cap; the EU/Asia scanner
+   locations require paid IBKR data bundles, so a built-in **fallback list
+   of the most liquid stocks per region** (ASML, Shell, Adyen … on
+   Amsterdam; Tencent, Toyota … on Hong Kong/Tokyo, with their fixed board
+   lots) joins the same ranking — the whole world competes even without
+   subscriptions;
 2. it ranks all candidates on **average daily turnover converted to EUR**
    (price × volume × live FX) computed from real daily bars, keeping those
    above `US_STOCK_MIN_DOLLAR_VOLUME` (€50M/day by default) — so a German,

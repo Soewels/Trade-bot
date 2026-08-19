@@ -24,13 +24,16 @@ class RiskManager:
 
     def position_size(self, equity: float, price: float, atr: float,
                       buying_power: float, fractional: bool,
-                      max_notional: Optional[float] = None) -> float:
+                      max_notional: Optional[float] = None,
+                      lot_size: float = 1.0) -> float:
         """Quantity such that a 1 ATR adverse move loses risk_per_trade of equity.
 
         Quiet instruments (small ATR) get larger positions, volatile ones
         smaller — dollar risk stays constant. The size is capped so the
         notional never exceeds the available buying power, nor the optional
         `max_notional` (the remaining sleeve budget, e.g. CRYPTO_BUDGET).
+        `lot_size` > 1 (Aziatische kavels) rondt af naar beneden op hele
+        kavels; past er geen kavel binnen de limieten, dan is de uitkomst 0.
         """
         if equity <= 0 or price <= 0 or atr <= 0:
             return 0.0
@@ -39,6 +42,8 @@ class RiskManager:
         qty = min(qty, max_qty)
         if max_notional is not None:
             qty = min(qty, max_notional / price)
+        if lot_size and lot_size > 1:
+            return float(math.floor(qty / lot_size) * lot_size)
         if fractional:
             return math.floor(qty * 1e6) / 1e6
         return float(math.floor(qty))
