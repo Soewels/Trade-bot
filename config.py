@@ -89,6 +89,33 @@ def parse_stock_regions(raw: str) -> list[str]:
 
 
 STOCK_REGIONS = parse_stock_regions(os.environ.get("STOCK_REGIONS", "US,EU,ASIA"))
+
+# Vangnet voor regio's waar de IBKR-scanner een betaald data-abonnement
+# vereist (Europa, Azië): vaste lijsten met de meest liquide aandelen per
+# regio. Ze doorlopen exact dezelfde euro-omzet-ranking als de
+# scanner-kandidaten; aandelen zonder (gratis vertraagde) koersdata vallen
+# er onderweg vanzelf uit. Xetra en Parijs ontbreken bewust: die leveren
+# zonder abonnement geen data. lot_size = vaste handelskavel (Azië).
+REGION_FALLBACK_STOCKS = {
+    "US": [],  # de VS-scanner werkt gratis; geen vangnet nodig
+    "EU": [    # Euronext Amsterdam (AEB): gratis vertraagde data, EUR
+        {"symbol": sym, "exchange": "AEB", "currency": "EUR",
+         "primaryExchange": "AEB", "hours": "AEB"}
+        for sym in ("ASML", "SHELL", "UNA", "ADYEN", "INGA", "PHIA", "PRX",
+                    "HEIA", "BESI", "ASM", "AD", "ABN", "MT", "WKL", "RAND")
+    ],
+    "ASIA": [
+        *({"symbol": sym, "exchange": "SEHK", "currency": "HKD",
+           "primaryExchange": "SEHK", "hours": "SEHK", "lot_size": lot}
+          for sym, lot in (("700", 100), ("9988", 100), ("1299", 200),
+                           ("3690", 100), ("1810", 200), ("941", 500),
+                           ("2318", 500))),
+        *({"symbol": sym, "exchange": "TSEJ", "currency": "JPY",
+           "primaryExchange": "TSEJ", "hours": "TSEJ", "lot_size": 100}
+          for sym in ("7203", "6758", "6861", "8035", "7974", "9984",
+                      "8306")),
+    ],
+}
 US_STOCK_THRESHOLD = 2.0            # entry threshold in std devs (wider: single
                                     # stocks are noisier than index trackers)
 US_STOCK_MIN_PRICE = 10.0           # skip penny-ish stocks

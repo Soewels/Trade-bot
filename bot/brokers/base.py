@@ -66,6 +66,11 @@ class Broker:
     def allows_fractional(self, symbol: str) -> bool:
         raise NotImplementedError
 
+    def lot_size(self, symbol: str) -> float:
+        """Vaste handelskavel (bv. 100 stuks op Aziatische beurzen);
+        1 = per stuk verhandelbaar (de standaard)."""
+        return 1.0
+
     # --- orders ---------------------------------------------------------------
 
     def submit_market_order(self, symbol: str, side: str, qty: float) -> Fill:

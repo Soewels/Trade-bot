@@ -60,17 +60,25 @@ def merge_universe(current: list[str], held: set[str], picks: list[str],
 
 def find_liquid_stocks(broker, count: int, min_price: float,
                        min_market_cap_musd: float, min_dollar_volume: float,
-                       locations: list[str]) -> tuple[list[str], dict[str, dict]]:
+                       locations: list[str],
+                       extra_candidates: list[dict] = ()) -> tuple[list[str], dict[str, dict]]:
     """Scan de regio's en rangschik op euro-omzet.
 
-    Geeft (ranking, metadata per symbool) terug; de metadata (valuta,
-    primaire beurs, openingstijden) is nodig om het aandeel correct te
-    verhandelen en wordt door de bot in de state bewaard."""
+    `extra_candidates` zijn vaste kandidaten (bv. Europese/Aziatische
+    grootmachten) voor regio's waar de scanner een betaald abonnement
+    vereist; ze doorlopen dezelfde ranking. Geeft (ranking, metadata per
+    symbool) terug; de metadata (valuta, primaire beurs, openingstijden,
+    handelskavel) is nodig om het aandeel correct te verhandelen en wordt
+    door de bot in de state bewaard."""
     rows = max(count * 3, 10)
     candidates = broker.scan_most_active(min_price, min_market_cap_musd,
                                          rows, tuple(locations))
-    log.info("scanner: %d kandidaten uit %d regio-locaties",
-             len(candidates), len(locations))
+    seen = {cand["symbol"] for cand in candidates}
+    candidates += [cand for cand in extra_candidates
+                   if cand["symbol"] not in seen]
+    log.info("scanner: %d kandidaten uit %d regio-locaties "
+             "(incl. %d vaste wereldwijde kandidaten)",
+             len(candidates), len(locations), len(extra_candidates))
     bars_by_symbol: dict[str, list[Bar]] = {}
     fx_by_symbol: dict[str, float] = {}
     metas: dict[str, dict] = {}
@@ -88,8 +96,11 @@ def find_liquid_stocks(broker, count: int, min_price: float,
             log.info("kandidaat %s overgeslagen: onbekende beurs %s",
                      symbol, primary or "(leeg)")
             continue
-        meta = {"exchange": "SMART", "currency": currency,
-                "primaryExchange": primary, "hours": hours}
+        meta = {"exchange": cand.get("exchange", "SMART"),
+                "currency": currency, "primaryExchange": primary,
+                "hours": hours}
+        if cand.get("lot_size"):
+            meta["lot_size"] = cand["lot_size"]
         broker.add_instrument(symbol, meta)
         try:
             fx_by_symbol[symbol] = broker.to_base_rate(symbol)

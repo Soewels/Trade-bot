@@ -344,11 +344,15 @@ class Bot:
         self.portfolio.save()
         locations = [loc for region in config.STOCK_REGIONS
                      for loc in config.REGION_LOCATIONS[region]]
+        # vaste wereldwijde kandidaten voor regio's waar de scanner een
+        # betaald abonnement vereist (Europa, Azië)
+        extras = [dict(cand) for region in config.STOCK_REGIONS
+                  for cand in config.REGION_FALLBACK_STOCKS.get(region, [])]
         try:
             picks, cand_metas = screener.find_liquid_stocks(
                 broker, config.US_STOCK_COUNT, config.US_STOCK_MIN_PRICE,
                 config.US_STOCK_MIN_MARKET_CAP_MUSD,
-                config.US_STOCK_MIN_DOLLAR_VOLUME, locations)
+                config.US_STOCK_MIN_DOLLAR_VOLUME, locations, extras)
         except Exception as exc:
             meta["us_stocks_next_scan"] = time.time() + config.US_STOCK_RETRY_HOURS * 3600
             self.portfolio.save()
@@ -542,7 +546,13 @@ class Bot:
         qty = self.risk.position_size(equity, bars[-1].close * fx, atr * fx,
                                       buying_power,
                                       fractional=broker.allows_fractional(symbol),
-                                      max_notional=max_notional)
+                                      max_notional=max_notional,
+                                      lot_size=broker.lot_size(symbol))
+        if qty <= 0 and broker.lot_size(symbol) > 1:
+            log.info("entry %s overgeslagen: één handelskavel (%g stuks) "
+                     "past niet binnen de limieten", symbol,
+                     broker.lot_size(symbol))
+            return
         self.portfolio.open_position(
             symbol, signal.action, qty, strategy.name, atr,
             stop_price_fn=lambda fill: self.risk.hard_stop_price(

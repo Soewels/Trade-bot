@@ -247,6 +247,9 @@ class IBKRBroker(Broker):
     def allows_fractional(self, symbol: str) -> bool:
         return False
 
+    def lot_size(self, symbol: str) -> float:
+        return float(self.instruments.get(symbol, {}).get("lot_size", 1))
+
     # --- screener support --------------------------------------------------------
 
     def scan_most_active(self, min_price: float, min_market_cap_musd: float,

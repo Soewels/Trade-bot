@@ -128,6 +128,74 @@ class WorldwideScreenerTests(unittest.TestCase):
         self.assertEqual(ranked[0], "SAP")
 
 
+class WorldwideFallbackTests(unittest.TestCase):
+    def test_fallback_lists_are_consistent(self):
+        from bot.brokers.ibkr_broker import EXCHANGE_HOURS
+        for region, cands in config.REGION_FALLBACK_STOCKS.items():
+            self.assertIn(region, config.REGION_LOCATIONS)
+            for cand in cands:
+                self.assertTrue(cand["symbol"])
+                self.assertNotEqual(cand["currency"], "GBP")  # pence-regel
+                self.assertIn(cand["hours"], EXCHANGE_HOURS)
+                if cand["currency"] in ("HKD", "JPY"):  # Azië: vaste kavels
+                    self.assertGreaterEqual(cand.get("lot_size", 0), 100)
+
+    def test_extra_candidates_join_ranking_and_dedupe(self):
+        class ScanStub:
+            def __init__(self):
+                self.instruments = {}
+
+            def scan_most_active(self, min_price, cap, rows, locations):
+                return [{"symbol": "NVDA", "currency": "USD",
+                         "primaryExchange": "NASDAQ"}]
+
+            def add_instrument(self, symbol, meta):
+                self.instruments[symbol] = meta
+
+            def to_base_rate(self, symbol):
+                return 1.0
+
+            def fetch_bars(self, symbol, tf, limit):
+                return daily_bars(close=100.0, volume=2e6)
+
+        extras = [
+            {"symbol": "ASML", "exchange": "AEB", "currency": "EUR",
+             "primaryExchange": "AEB", "hours": "AEB"},
+            {"symbol": "700", "exchange": "SEHK", "currency": "HKD",
+             "primaryExchange": "SEHK", "hours": "SEHK", "lot_size": 100},
+            {"symbol": "NVDA", "currency": "USD",
+             "primaryExchange": "NASDAQ"},  # dubbel: scanner wint
+        ]
+        broker = ScanStub()
+        ranked, metas = find_liquid_stocks(broker, count=3, min_price=10,
+                                           min_market_cap_musd=1e4,
+                                           min_dollar_volume=50e6,
+                                           locations=["STK.US.MAJOR"],
+                                           extra_candidates=extras)
+        self.assertEqual(set(ranked), {"NVDA", "ASML", "700"})
+        self.assertEqual(metas["ASML"]["exchange"], "AEB")
+        self.assertEqual(metas["700"]["lot_size"], 100)
+        self.assertEqual(metas["NVDA"]["exchange"], "SMART")
+
+
+class LotSizeTests(unittest.TestCase):
+    def test_position_size_rounds_down_to_whole_lots(self):
+        from bot.risk_manager import RiskManager
+        risk = RiskManager()
+        qty = risk.position_size(equity=100_000, price=40.0, atr=2.0,
+                                 buying_power=100_000, fractional=False,
+                                 lot_size=100)
+        self.assertEqual(qty, 500.0)  # 1%/ATR = 500: precies 5 kavels
+
+    def test_position_size_zero_when_lot_does_not_fit(self):
+        from bot.risk_manager import RiskManager
+        risk = RiskManager()
+        qty = risk.position_size(equity=20_000, price=45.0, atr=1.0,
+                                 buying_power=20_000, fractional=False,
+                                 max_notional=500.0, lot_size=100)
+        self.assertEqual(qty, 0.0)  # kavel kost 4.500 > limiet 500
+
+
 class MergeUniverseTests(unittest.TestCase):
     def test_fills_free_slots_with_best_picks(self):
         universe = merge_universe(current=[], held=set(),
