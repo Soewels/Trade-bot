@@ -140,6 +140,53 @@ class CryptoConfigTests(unittest.TestCase):
             kraken_broker.kraken.fetch_price = orig
 
 
+class IbkrOrderTests(unittest.TestCase):
+    def test_market_order_sets_explicit_tif(self):
+        """Zonder expliciete tif past IBKR de order aan en stuurt melding
+        10349, die ib_async als fout ziet — de order werd dan onterecht
+        geannuleerd. De tif moet dus altijd expliciet 'DAY' zijn."""
+        import sys
+        import types
+
+        captured = {}
+
+        class FakeTrade:
+            orderStatus = types.SimpleNamespace(status="Filled",
+                                                avgFillPrice=101.0, filled=2.0)
+
+            def isDone(self):
+                return True
+
+        class FakeIB:
+            def placeOrder(self, contract, order):
+                captured["order"] = order
+                return FakeTrade()
+
+        fake = types.ModuleType("ib_async")
+        fake.IB = FakeIB
+        fake.MarketOrder = (lambda action, qty, **kw:
+                            types.SimpleNamespace(action=action,
+                                                  totalQuantity=qty, **kw))
+        had = sys.modules.get("ib_async")
+        sys.modules["ib_async"] = fake
+        try:
+            from bot.brokers.ibkr_broker import IBKRBroker
+            broker = IBKRBroker("localhost", 4002, 17,
+                                {"NVDA": {"exchange": "SMART",
+                                          "currency": "USD"}})
+            broker._contracts["NVDA"] = object()  # kwalificatie overslaan
+            fill = broker.submit_market_order("NVDA", "buy", 2.0)
+        finally:
+            if had is None:
+                del sys.modules["ib_async"]
+            else:
+                sys.modules["ib_async"] = had
+        self.assertEqual(captured["order"].tif, "DAY")
+        self.assertEqual(captured["order"].action, "BUY")
+        self.assertEqual(fill.price, 101.0)
+        self.assertEqual(fill.qty, 2.0)
+
+
 class RiskOnPairTests(unittest.TestCase):
     def test_correlation_filter_uses_configured_pair(self):
         risk = RiskManager(risk_on_pair=("SXR8", "SXRV"))

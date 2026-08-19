@@ -343,7 +343,11 @@ class IBKRBroker(Broker):
     # --- orders ---------------------------------------------------------------
 
     def submit_market_order(self, symbol: str, side: str, qty: float) -> Fill:
-        order = self._lib.MarketOrder(side.upper(), qty)
+        # tif expliciet meegeven: zonder tif "corrigeert" IBKR de order naar
+        # DAY en stuurt daar melding 10349 over — ib_async kent die code
+        # niet, ziet hem aan voor een fout en bestempelt de order als
+        # geannuleerd, waarna de bot hem echt annuleerde. Order na order.
+        order = self._lib.MarketOrder(side.upper(), qty, tif="DAY")
         trade = self.ib.placeOrder(self._contract(symbol), order)
         deadline = 60.0
         waited = 0.0
